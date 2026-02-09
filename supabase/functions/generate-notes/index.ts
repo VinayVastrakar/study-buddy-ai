@@ -19,7 +19,7 @@ serve(async (req) => {
   }
 
   try {
-    const { syllabusText, detailLevel, language } = await req.json();
+    const { syllabusText, detailLevel, language, userApiKey } = await req.json();
 
     if (!syllabusText || !detailLevel || !language) {
       return new Response(
@@ -28,8 +28,10 @@ serve(async (req) => {
       );
     }
 
+    // Determine which API to use
+    const useUserKey = !!userApiKey;
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    if (!useUserKey && !LOVABLE_API_KEY) throw new Error("No API key available. Please add your Gemini API key in settings.");
 
     const detailInstruction = DETAIL_PROMPTS[String(detailLevel)] || DETAIL_PROMPTS["2"];
 
@@ -78,14 +80,23 @@ OUTPUT: Return ONLY valid JSON with this structure:
 
 Do NOT include markdown outside JSON. Do NOT include explanations outside JSON. JSON must be parseable.`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // Call either Google Gemini directly or Lovable AI gateway
+    const apiUrl = useUserKey
+      ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+      : "https://ai.gateway.lovable.dev/v1/chat/completions";
+
+    const authHeader = useUserKey
+      ? `Bearer ${userApiKey}`
+      : `Bearer ${LOVABLE_API_KEY}`;
+
+    const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: authHeader,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: useUserKey ? "gemini-2.5-flash" : "google/gemini-2.5-flash",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `Here is the syllabus text:\n\n${syllabusText}` },
