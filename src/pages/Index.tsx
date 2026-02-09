@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import SyllabusUploader from "@/components/SyllabusUploader";
 import NotesViewer from "@/components/NotesViewer";
 import LoadingNotes from "@/components/LoadingNotes";
+import ApiKeySettings, { getStoredApiKey } from "@/components/ApiKeySettings";
 import { streamSSE } from "@/lib/parseSSE";
 import type { GeneratedNotes, DetailLevel, Language } from "@/types/notes";
 
@@ -25,7 +26,7 @@ export default function Index() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ syllabusText, detailLevel, language }),
+        body: JSON.stringify({ syllabusText, detailLevel, language, userApiKey: getStoredApiKey() || undefined }),
       });
 
       if (resp.status === 429) {
@@ -108,7 +109,10 @@ export default function Index() {
       <main className="px-4 pb-16">
         {isLoading && <LoadingNotes />}
         {!notes && !isLoading && (
-          <SyllabusUploader onGenerate={handleGenerate} isLoading={isLoading} />
+          <>
+            <ApiKeySettings />
+            <SyllabusUploader onGenerate={handleGenerate} isLoading={isLoading} />
+          </>
         )}
         {notes && <NotesViewer notes={notes} onReset={() => setNotes(null)} />}
       </main>
