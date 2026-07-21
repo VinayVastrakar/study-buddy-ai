@@ -1,41 +1,121 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BookOpen, ChevronRight, ArrowLeft, GraduationCap, Download } from "lucide-react";
+import {
+  BookOpen, ChevronRight, ArrowLeft, GraduationCap, Download,
+  Pencil, Plus, Save, X, Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import type { GeneratedNotes } from "@/types/notes";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { exportPDF, exportDOCX, exportMarkdown, exportJSON } from "@/lib/exportNotes";
+import {
+  exportPDF, exportDOCX, exportMarkdown, exportJSON,
+  exportTopicPDF, exportTopicDOCX, exportTopicMarkdown, exportTopicJSON,
+} from "@/lib/exportNotes";
 
 interface Props {
   notes: GeneratedNotes;
   onReset: () => void;
+  onChange?: (updated: GeneratedNotes) => void | Promise<void>;
 }
 
-
-export default function NotesViewer({ notes, onReset }: Props) {
+export default function NotesViewer({ notes: initialNotes, onReset, onChange }: Props) {
+  const [notes, setNotes] = useState<GeneratedNotes>(initialNotes);
   const [activeUnit, setActiveUnit] = useState(0);
   const [activeTopic, setActiveTopic] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [draftContent, setDraftContent] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setNotes(initialNotes); }, [initialNotes]);
 
   const unit = notes.units[activeUnit];
   const topic = unit?.topics[activeTopic];
 
+  const persist = async (next: GeneratedNotes) => {
+    setNotes(next);
+    if (onChange) {
+      setSaving(true);
+      try { await onChange(next); }
+      finally { setSaving(false); }
+    }
+  };
+
+  const startEdit = () => {
+    if (!topic) return;
+    setDraftName(topic.topicName);
+    setDraftContent(topic.content);
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    if (!draftName.trim()) { toast.error("Topic name cannot be empty"); return; }
+    const next: GeneratedNotes = {
+      ...notes,
+      units: notes.units.map((u, ui) =>
+        ui !== activeUnit ? u : {
+          ...u,
+          topics: u.topics.map((t, ti) =>
+            ti !== activeTopic ? t : { topicName: draftName.trim(), content: draftContent }
+          ),
+        }
+      ),
+    };
+    await persist(next);
+    setEditing(false);
+    toast.success("Topic updated");
+  };
+
+  const addTopic = async (unitIdx: number) => {
+    const name = window.prompt("New topic name:");
+    if (!name || !name.trim()) return;
+    const next: GeneratedNotes = {
+      ...notes,
+      units: notes.units.map((u, ui) =>
+        ui !== unitIdx ? u : { ...u, topics: [...u.topics, { topicName: name.trim(), content: "" }] }
+      ),
+    };
+    await persist(next);
+    setActiveUnit(unitIdx);
+    setActiveTopic(next.units[unitIdx].topics.length - 1);
+    // open editor on the new topic
+    setDraftName(name.trim());
+    setDraftContent("");
+    setEditing(true);
+    toast.success("Topic added — start writing");
+  };
+
+  const deleteTopic = async () => {
+    if (!unit || unit.topics.length <= 1) { toast.error("Unit must have at least one topic"); return; }
+    if (!window.confirm(`Delete topic "${topic?.topicName}"?`)) return;
+    const next: GeneratedNotes = {
+      ...notes,
+      units: notes.units.map((u, ui) =>
+        ui !== activeUnit ? u : { ...u, topics: u.topics.filter((_, ti) => ti !== activeTopic) }
+      ),
+    };
+    await persist(next);
+    setActiveTopic(Math.max(0, activeTopic - 1));
+    toast.success("Topic deleted");
+  };
+
+  const runExport = async (fn: () => void | Promise<void>, label: string) => {
+    try { await fn(); toast.success(`${label} downloaded`); }
+    catch (e) { console.error(e); toast.error(`${label} export failed`); }
+  };
+
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="w-full max-w-5xl mx-auto"
-    >
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
         <div>
           <Button variant="ghost" size="sm" onClick={onReset} className="text-muted-foreground mb-2">
-            <ArrowLeft className="h-4 w-4 mr-1" /> New Syllabus
+            <ArrowLeft className="h-4 w-4 mr-1" /> Back
           </Button>
           <h1 className="text-3xl md:text-4xl font-heading text-foreground">{notes.subject}</h1>
           {notes.course && (
@@ -48,59 +128,31 @@ export default function NotesViewer({ notes, onReset }: Props) {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1.5">
-                <Download className="h-3.5 w-3.5" /> Export
+                <Download className="h-3.5 w-3.5" /> Export All
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={async () => {
-                  try { await exportPDF(notes); toast.success("PDF downloaded"); }
-                  catch (e) { toast.error("PDF export failed"); console.error(e); }
-                }}
-              >
-                Export as PDF
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={async () => {
-                  try { await exportDOCX(notes); toast.success("Word document downloaded"); }
-                  catch (e) { toast.error("DOCX export failed"); console.error(e); }
-                }}
-              >
-                Export as Word (.docx)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { exportMarkdown(notes); toast.success("Markdown downloaded"); }}>
-                Export as Markdown
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { exportJSON(notes); toast.success("JSON downloaded"); }}>
-                Export as JSON
-              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => runExport(() => exportPDF(notes), "PDF")}>Export as PDF</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => runExport(() => exportDOCX(notes), "Word")}>Export as Word (.docx)</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => runExport(() => exportMarkdown(notes), "Markdown")}>Export as Markdown</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => runExport(() => exportJSON(notes), "JSON")}>Export as JSON</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
-            {notes.language}
-          </span>
-          <span className="px-3 py-1 rounded-full bg-accent/10 text-accent-foreground text-xs font-medium">
-            Level {notes.detailLevel}
-          </span>
+          <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">{notes.language}</span>
+          <span className="px-3 py-1 rounded-full bg-accent/10 text-accent-foreground text-xs font-medium">Level {notes.detailLevel}</span>
         </div>
-
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-6">
-        {/* Sidebar – Units & Topics */}
+        {/* Sidebar */}
         <nav className="rounded-lg bg-card border border-border p-4 space-y-3 h-fit md:sticky md:top-6">
           <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-2">Units</h3>
           {notes.units.map((u, ui) => (
             <div key={ui}>
               <button
-                onClick={() => {
-                  setActiveUnit(ui);
-                  setActiveTopic(0);
-                }}
+                onClick={() => { setActiveUnit(ui); setActiveTopic(0); setEditing(false); }}
                 className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeUnit === ui
-                    ? "bg-primary/10 text-primary"
-                    : "text-foreground hover:bg-muted"
+                  activeUnit === ui ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
                 }`}
               >
                 <span className="text-xs text-muted-foreground mr-2">U{u.unitNumber}</span>
@@ -117,7 +169,7 @@ export default function NotesViewer({ notes, onReset }: Props) {
                     {u.topics.map((t, ti) => (
                       <button
                         key={ti}
-                        onClick={() => setActiveTopic(ti)}
+                        onClick={() => { setActiveTopic(ti); setEditing(false); }}
                         className={`w-full text-left px-3 py-1.5 rounded text-xs transition-colors flex items-center gap-1 ${
                           activeTopic === ti && activeUnit === ui
                             ? "text-primary font-medium"
@@ -128,6 +180,12 @@ export default function NotesViewer({ notes, onReset }: Props) {
                         <span className="line-clamp-1">{t.topicName}</span>
                       </button>
                     ))}
+                    <button
+                      onClick={() => addTopic(ui)}
+                      className="w-full text-left px-3 py-1.5 rounded text-xs text-primary/80 hover:text-primary hover:bg-primary/5 transition-colors flex items-center gap-1 mt-1"
+                    >
+                      <Plus className="h-3 w-3" /> Add topic
+                    </button>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -138,66 +196,118 @@ export default function NotesViewer({ notes, onReset }: Props) {
         {/* Content */}
         <AnimatePresence mode="wait">
           <motion.article
-            key={`${activeUnit}-${activeTopic}`}
+            key={`${activeUnit}-${activeTopic}-${editing ? "e" : "v"}`}
             initial={{ opacity: 0, x: 10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -10 }}
-            transition={{ duration: 0.25 }}
+            transition={{ duration: 0.2 }}
             className="rounded-lg bg-card border border-border p-6 md:p-8"
           >
-            <div className="flex items-start gap-3 mb-4">
-              <div className="rounded-full bg-primary/10 p-2 mt-1">
-                <BookOpen className="h-5 w-5 text-primary" />
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div className="flex items-start gap-3 flex-1 min-w-0">
+                <div className="rounded-full bg-primary/10 p-2 mt-1 shrink-0">
+                  <BookOpen className="h-5 w-5 text-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-muted-foreground">
+                    Unit {unit?.unitNumber} — {unit?.unitName}
+                  </p>
+                  {editing ? (
+                    <Input
+                      value={draftName}
+                      onChange={(e) => setDraftName(e.target.value)}
+                      className="mt-1 font-heading text-xl md:text-2xl h-auto py-1.5"
+                      placeholder="Topic name"
+                    />
+                  ) : (
+                    <h2 className="text-2xl font-heading text-foreground mt-1 break-words">
+                      {topic?.topicName}
+                    </h2>
+                  )}
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground">
-                  Unit {unit?.unitNumber} — {unit?.unitName}
-                </p>
-                <h2 className="text-2xl font-heading text-foreground mt-1">
-                  {topic?.topicName}
-                </h2>
+
+              <div className="flex items-center gap-1 shrink-0">
+                {!editing && topic && (
+                  <>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="gap-1.5" title="Export this topic">
+                          <Download className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => runExport(() => exportTopicPDF(notes.subject, unit, topic), "Topic PDF")}>Topic as PDF</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => runExport(() => exportTopicDOCX(notes.subject, unit, topic), "Topic Word")}>Topic as Word</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => runExport(() => exportTopicMarkdown(notes.subject, unit, topic), "Topic Markdown")}>Topic as Markdown</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => runExport(() => exportTopicJSON(notes.subject, unit, topic), "Topic JSON")}>Topic as JSON</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <Button variant="ghost" size="sm" onClick={startEdit} title="Edit topic">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={deleteTopic} title="Delete topic" className="text-destructive hover:text-destructive">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                )}
+                {editing && (
+                  <>
+                    <Button size="sm" onClick={saveEdit} disabled={saving} className="gap-1.5">
+                      <Save className="h-3.5 w-3.5" /> {saving ? "Saving…" : "Save"}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={saving}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
               </div>
-            </div>
-            <div className="prose prose-sm max-w-none text-foreground/90 leading-relaxed font-body whitespace-pre-line">
-              {topic?.content}
             </div>
 
+            {editing ? (
+              <Textarea
+                value={draftContent}
+                onChange={(e) => setDraftContent(e.target.value)}
+                placeholder="Write topic content…"
+                className="min-h-[400px] font-body leading-relaxed text-base"
+              />
+            ) : (
+              <div className="prose prose-sm max-w-none text-foreground/90 leading-relaxed font-body whitespace-pre-line">
+                {topic?.content || <span className="text-muted-foreground italic">No content yet. Click edit to add.</span>}
+              </div>
+            )}
+
             {/* Navigation */}
-            <div className="flex justify-between mt-8 pt-4 border-t border-border">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={activeTopic === 0 && activeUnit === 0}
-                onClick={() => {
-                  if (activeTopic > 0) {
-                    setActiveTopic(activeTopic - 1);
-                  } else if (activeUnit > 0) {
-                    setActiveUnit(activeUnit - 1);
-                    setActiveTopic(notes.units[activeUnit - 1].topics.length - 1);
-                  }
-                }}
-              >
-                ← Previous
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={
-                  activeUnit === notes.units.length - 1 &&
-                  activeTopic === (unit?.topics.length ?? 1) - 1
-                }
-                onClick={() => {
-                  if (activeTopic < (unit?.topics.length ?? 1) - 1) {
-                    setActiveTopic(activeTopic + 1);
-                  } else if (activeUnit < notes.units.length - 1) {
-                    setActiveUnit(activeUnit + 1);
-                    setActiveTopic(0);
-                  }
-                }}
-              >
-                Next →
-              </Button>
-            </div>
+            {!editing && (
+              <div className="flex justify-between mt-8 pt-4 border-t border-border">
+                <Button
+                  variant="ghost" size="sm"
+                  disabled={activeTopic === 0 && activeUnit === 0}
+                  onClick={() => {
+                    if (activeTopic > 0) setActiveTopic(activeTopic - 1);
+                    else if (activeUnit > 0) {
+                      setActiveUnit(activeUnit - 1);
+                      setActiveTopic(notes.units[activeUnit - 1].topics.length - 1);
+                    }
+                  }}
+                >
+                  ← Previous
+                </Button>
+                <Button
+                  variant="ghost" size="sm"
+                  disabled={activeUnit === notes.units.length - 1 && activeTopic === (unit?.topics.length ?? 1) - 1}
+                  onClick={() => {
+                    if (activeTopic < (unit?.topics.length ?? 1) - 1) setActiveTopic(activeTopic + 1);
+                    else if (activeUnit < notes.units.length - 1) {
+                      setActiveUnit(activeUnit + 1);
+                      setActiveTopic(0);
+                    }
+                  }}
+                >
+                  Next →
+                </Button>
+              </div>
+            )}
           </motion.article>
         </AnimatePresence>
       </div>

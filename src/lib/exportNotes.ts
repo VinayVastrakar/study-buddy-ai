@@ -149,3 +149,19 @@ export async function exportDOCX(notes: GeneratedNotes) {
   const blob = await Packer.toBlob(doc);
   download(blob, filename(notes, "docx"));
 }
+
+/* -------------------- Per-topic exports -------------------- */
+import type { NoteUnit, NoteTopic } from "@/types/notes";
+
+const topicNotes = (subject: string, unit: NoteUnit, topic: NoteTopic): GeneratedNotes => ({
+  subject: `${subject} — ${topic.topicName}`,
+  course: `Unit ${unit.unitNumber}: ${unit.unitName}`,
+  language: "",
+  detailLevel: "",
+  units: [{ unitNumber: unit.unitNumber, unitName: unit.unitName, topics: [topic] }],
+});
+
+export const exportTopicPDF = (s: string, u: NoteUnit, t: NoteTopic) => exportPDF(topicNotes(s, u, t));
+export const exportTopicDOCX = (s: string, u: NoteUnit, t: NoteTopic) => exportDOCX(topicNotes(s, u, t));
+export const exportTopicMarkdown = (s: string, u: NoteUnit, t: NoteTopic) => exportMarkdown(topicNotes(s, u, t));
+export const exportTopicJSON = (s: string, u: NoteUnit, t: NoteTopic) => exportJSON(topicNotes(s, u, t));
