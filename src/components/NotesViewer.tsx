@@ -1,13 +1,22 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BookOpen, ChevronRight, ArrowLeft, GraduationCap } from "lucide-react";
+import { BookOpen, ChevronRight, ArrowLeft, GraduationCap, Download } from "lucide-react";
+import { toast } from "sonner";
 import type { GeneratedNotes } from "@/types/notes";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { exportPDF, exportDOCX, exportMarkdown, exportJSON } from "@/lib/exportNotes";
 
 interface Props {
   notes: GeneratedNotes;
   onReset: () => void;
 }
+
 
 export default function NotesViewer({ notes, onReset }: Props) {
   const [activeUnit, setActiveUnit] = useState(0);
