@@ -1,13 +1,22 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BookOpen, ChevronRight, ArrowLeft, GraduationCap } from "lucide-react";
+import { BookOpen, ChevronRight, ArrowLeft, GraduationCap, Download } from "lucide-react";
+import { toast } from "sonner";
 import type { GeneratedNotes } from "@/types/notes";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { exportPDF, exportDOCX, exportMarkdown, exportJSON } from "@/lib/exportNotes";
 
 interface Props {
   notes: GeneratedNotes;
   onReset: () => void;
 }
+
 
 export default function NotesViewer({ notes, onReset }: Props) {
   const [activeUnit, setActiveUnit] = useState(0);
@@ -35,7 +44,38 @@ export default function NotesViewer({ notes, onReset }: Props) {
             </p>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <Download className="h-3.5 w-3.5" /> Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={async () => {
+                  try { await exportPDF(notes); toast.success("PDF downloaded"); }
+                  catch (e) { toast.error("PDF export failed"); console.error(e); }
+                }}
+              >
+                Export as PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={async () => {
+                  try { await exportDOCX(notes); toast.success("Word document downloaded"); }
+                  catch (e) { toast.error("DOCX export failed"); console.error(e); }
+                }}
+              >
+                Export as Word (.docx)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { exportMarkdown(notes); toast.success("Markdown downloaded"); }}>
+                Export as Markdown
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { exportJSON(notes); toast.success("JSON downloaded"); }}>
+                Export as JSON
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
             {notes.language}
           </span>
@@ -43,6 +83,7 @@ export default function NotesViewer({ notes, onReset }: Props) {
             Level {notes.detailLevel}
           </span>
         </div>
+
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-6">
