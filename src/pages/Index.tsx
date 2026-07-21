@@ -17,12 +17,13 @@ const GENERATE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate
 export default function Index() {
   const { session, user } = useAuth();
   const [notes, setNotes] = useState<GeneratedNotes | null>(null);
+  const [historyId, setHistoryId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const saveHistory = useCallback(
     async (n: GeneratedNotes, syllabusText: string, detailLevel: DetailLevel, language: Language) => {
       if (!user) return;
-      const { error } = await supabase.from("notes_history").insert({
+      const { data, error } = await supabase.from("notes_history").insert({
         user_id: user.id,
         subject: n.subject || "Untitled",
         course: n.course || null,
@@ -30,12 +31,24 @@ export default function Index() {
         detail_level: detailLevel,
         syllabus_text: syllabusText,
         notes: n as unknown as any,
-      });
+      }).select("id").single();
       if (error) toast.error("Could not save to history: " + error.message);
-      else toast.success("Saved to your history");
+      else { setHistoryId(data.id); toast.success("Saved to your history"); }
     },
     [user]
   );
+
+  const handleChange = useCallback(async (updated: GeneratedNotes) => {
+    setNotes(updated);
+    if (!historyId) return;
+    const { error } = await supabase
+      .from("notes_history")
+      .update({ notes: updated as unknown as any, subject: updated.subject || "Untitled", course: updated.course || null })
+      .eq("id", historyId);
+    if (error) { toast.error("Could not save: " + error.message); throw error; }
+    toast.success("Saved");
+  }, [historyId]);
+
 
   const handleGenerate = useCallback(
     async (syllabusText: string, detailLevel: DetailLevel, language: Language) => {
@@ -117,7 +130,7 @@ export default function Index() {
             <SyllabusUploader onGenerate={handleGenerate} isLoading={isLoading} />
           </>
         )}
-        {notes && <NotesViewer notes={notes} onReset={() => setNotes(null)} />}
+        {notes && <NotesViewer notes={notes} onReset={() => { setNotes(null); setHistoryId(null); }} onChange={handleChange} />}
       </main>
     </div>
   );
