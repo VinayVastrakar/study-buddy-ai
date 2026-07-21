@@ -30,6 +30,17 @@ export default function NotesView() {
       });
   }, [id]);
 
+  const handleChange = async (updated: GeneratedNotes) => {
+    if (!id) return;
+    const { error } = await supabase
+      .from("notes_history")
+      .update({ notes: updated as unknown as any, subject: updated.subject || "Untitled", course: updated.course || null })
+      .eq("id", id);
+    if (error) { toast.error("Could not save: " + error.message); throw error; }
+    setNotes(updated);
+    toast.success("Saved");
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
@@ -37,7 +48,7 @@ export default function NotesView() {
         {loading ? (
           <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
         ) : notes ? (
-          <NotesViewer notes={notes} onReset={() => navigate("/history")} />
+          <NotesViewer notes={notes} onReset={() => navigate("/history")} onChange={handleChange} />
         ) : (
           <p className="text-center text-muted-foreground py-16">Notes not found.</p>
         )}
@@ -45,3 +56,4 @@ export default function NotesView() {
     </div>
   );
 }
+
