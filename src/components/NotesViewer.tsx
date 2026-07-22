@@ -2,26 +2,41 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen, ChevronRight, ArrowLeft, GraduationCap, Download,
-  Pencil, Plus, Save, X, Trash2,
+  Pencil, Plus, Save, X, Trash2, Sparkles, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { GeneratedNotes } from "@/types/notes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
   exportPDF, exportDOCX, exportMarkdown, exportJSON,
   exportTopicPDF, exportTopicDOCX, exportTopicMarkdown, exportTopicJSON,
 } from "@/lib/exportNotes";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Props {
   notes: GeneratedNotes;
   onReset: () => void;
   onChange?: (updated: GeneratedNotes) => void | Promise<void>;
 }
+
+const DETAIL_LABELS: Record<string, string> = {
+  "1": "Short Notes",
+  "2": "Exam Ready",
+  "3": "Deep Explanation",
+  "4": "Teaching Mode",
+};
 
 export default function NotesViewer({ notes: initialNotes, onReset, onChange }: Props) {
   const [notes, setNotes] = useState<GeneratedNotes>(initialNotes);
@@ -31,6 +46,14 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
   const [draftName, setDraftName] = useState("");
   const [draftContent, setDraftContent] = useState("");
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  // Add topic dialog
+  const [addOpen, setAddOpen] = useState(false);
+  const [addUnitIdx, setAddUnitIdx] = useState(0);
+  const [newName, setNewName] = useState("");
+  const [genDetail, setGenDetail] = useState(String(notes.detailLevel || "2"));
+  const [genLang, setGenLang] = useState(notes.language || "English");
 
   useEffect(() => { setNotes(initialNotes); }, [initialNotes]);
 
@@ -46,11 +69,46 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
     }
   };
 
+  const callAI = async (topicName: string, unitName: string, detailLevel: string, language: string): Promise<string> => {
+    const userApiKey = localStorage.getItem("gemini_api_key") || undefined;
+    const { data, error } = await supabase.functions.invoke("generate-topic", {
+      body: {
+        topicName,
+        subject: notes.subject,
+        course: notes.course,
+        unitName,
+        detailLevel,
+        language,
+        userApiKey,
+      },
+    });
+    if (error) throw error;
+    if (!data?.content) throw new Error("No content returned");
+    return data.content as string;
+  };
+
   const startEdit = () => {
     if (!topic) return;
     setDraftName(topic.topicName);
     setDraftContent(topic.content);
+    setGenDetail(String(notes.detailLevel || "2"));
+    setGenLang(notes.language || "English");
     setEditing(true);
+  };
+
+  const generateForEdit = async () => {
+    if (!draftName.trim()) { toast.error("Enter a topic name first"); return; }
+    setGenerating(true);
+    try {
+      const content = await callAI(draftName.trim(), unit?.unitName || "", genDetail, genLang);
+      setDraftContent(content);
+      toast.success("Content generated");
+    } catch (e) {
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const saveEdit = async () => {
@@ -71,20 +129,47 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
     toast.success("Topic updated");
   };
 
-  const addTopic = async (unitIdx: number) => {
-    const name = window.prompt("New topic name:");
-    if (!name || !name.trim()) return;
+  const openAddDialog = (unitIdx: number) => {
+    setAddUnitIdx(unitIdx);
+    setNewName("");
+    setGenDetail(String(notes.detailLevel || "2"));
+    setGenLang(notes.language || "English");
+    setAddOpen(true);
+  };
+
+  const insertNewTopic = async (name: string, content: string) => {
     const next: GeneratedNotes = {
       ...notes,
       units: notes.units.map((u, ui) =>
-        ui !== unitIdx ? u : { ...u, topics: [...u.topics, { topicName: name.trim(), content: "" }] }
+        ui !== addUnitIdx ? u : { ...u, topics: [...u.topics, { topicName: name, content }] }
       ),
     };
     await persist(next);
-    setActiveUnit(unitIdx);
-    setActiveTopic(next.units[unitIdx].topics.length - 1);
-    // open editor on the new topic
-    setDraftName(name.trim());
+    setActiveUnit(addUnitIdx);
+    setActiveTopic(next.units[addUnitIdx].topics.length - 1);
+    setAddOpen(false);
+  };
+
+  const addTopicWithAI = async () => {
+    if (!newName.trim()) { toast.error("Enter a topic name"); return; }
+    setGenerating(true);
+    try {
+      const targetUnit = notes.units[addUnitIdx];
+      const content = await callAI(newName.trim(), targetUnit?.unitName || "", genDetail, genLang);
+      await insertNewTopic(newName.trim(), content);
+      toast.success("Topic added with AI content");
+    } catch (e) {
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const addTopicEmpty = async () => {
+    if (!newName.trim()) { toast.error("Enter a topic name"); return; }
+    await insertNewTopic(newName.trim(), "");
+    setDraftName(newName.trim());
     setDraftContent("");
     setEditing(true);
     toast.success("Topic added — start writing");
@@ -181,7 +266,7 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
                       </button>
                     ))}
                     <button
-                      onClick={() => addTopic(ui)}
+                      onClick={() => openAddDialog(ui)}
                       className="w-full text-left px-3 py-1.5 rounded text-xs text-primary/80 hover:text-primary hover:bg-primary/5 transition-colors flex items-center gap-1 mt-1"
                     >
                       <Plus className="h-3 w-3" /> Add topic
@@ -253,10 +338,10 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
                 )}
                 {editing && (
                   <>
-                    <Button size="sm" onClick={saveEdit} disabled={saving} className="gap-1.5">
+                    <Button size="sm" onClick={saveEdit} disabled={saving || generating} className="gap-1.5">
                       <Save className="h-3.5 w-3.5" /> {saving ? "Saving…" : "Save"}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={saving}>
+                    <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={saving || generating}>
                       <X className="h-4 w-4" />
                     </Button>
                   </>
@@ -265,12 +350,42 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
             </div>
 
             {editing ? (
-              <Textarea
-                value={draftContent}
-                onChange={(e) => setDraftContent(e.target.value)}
-                placeholder="Write topic content…"
-                className="min-h-[400px] font-body leading-relaxed text-base"
-              />
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-end gap-3 p-3 rounded-md bg-muted/40 border border-border/60">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Detail Level</Label>
+                    <Select value={genDetail} onValueChange={setGenDetail}>
+                      <SelectTrigger className="w-[180px] h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(DETAIL_LABELS).map(([v, l]) => (
+                          <SelectItem key={v} value={v}>Level {v} — {l}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Language</Label>
+                    <Select value={genLang} onValueChange={setGenLang}>
+                      <SelectTrigger className="w-[150px] h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="English">English</SelectItem>
+                        <SelectItem value="Hinglish">Hinglish</SelectItem>
+                        <SelectItem value="Hindi">Hindi</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button size="sm" variant="secondary" onClick={generateForEdit} disabled={generating} className="gap-1.5">
+                    {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                    {generating ? "Generating…" : "Generate with AI"}
+                  </Button>
+                </div>
+                <Textarea
+                  value={draftContent}
+                  onChange={(e) => setDraftContent(e.target.value)}
+                  placeholder="Write topic content or click Generate with AI…"
+                  className="min-h-[400px] font-body leading-relaxed text-base"
+                />
+              </div>
             ) : (
               <div className="prose prose-sm max-w-none text-foreground/90 leading-relaxed font-body whitespace-pre-line">
                 {topic?.content || <span className="text-muted-foreground italic">No content yet. Click edit to add.</span>}
@@ -311,6 +426,55 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
           </motion.article>
         </AnimatePresence>
       </div>
+
+      {/* Add Topic Dialog */}
+      <Dialog open={addOpen} onOpenChange={(o) => !generating && setAddOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add new topic</DialogTitle>
+            <DialogDescription>
+              Adding to Unit {notes.units[addUnitIdx]?.unitNumber} — {notes.units[addUnitIdx]?.unitName}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Topic name</Label>
+              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Dependency Injection" autoFocus />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Detail Level</Label>
+                <Select value={genDetail} onValueChange={setGenDetail}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(DETAIL_LABELS).map(([v, l]) => (
+                      <SelectItem key={v} value={v}>Level {v} — {l}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Language</Label>
+                <Select value={genLang} onValueChange={setGenLang}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="English">English</SelectItem>
+                    <SelectItem value="Hinglish">Hinglish</SelectItem>
+                    <SelectItem value="Hindi">Hindi</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="ghost" onClick={addTopicEmpty} disabled={generating}>Add empty</Button>
+            <Button onClick={addTopicWithAI} disabled={generating} className="gap-1.5">
+              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {generating ? "Generating…" : "Generate with AI"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }

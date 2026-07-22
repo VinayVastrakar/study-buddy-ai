@@ -2,3 +2,6 @@ project_id = "vehzbgfnctmbdaxbutfb"
 
 [functions.generate-notes]
 verify_jwt = false
+
+[functions.generate-topic]
+verify_jwt = false
