@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen, ChevronRight, ArrowLeft, GraduationCap, Download,
-  Pencil, Plus, Save, X, Trash2, Sparkles, Loader2,
+  Pencil, Plus, Save, X, Trash2, Sparkles, Loader2, FolderPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { GeneratedNotes } from "@/types/notes";
@@ -24,6 +24,8 @@ import {
   exportTopicPDF, exportTopicDOCX, exportTopicMarkdown, exportTopicJSON,
 } from "@/lib/exportNotes";
 import { supabase } from "@/integrations/supabase/client";
+import MarkdownContent from "./MarkdownContent";
+import ReadAloud from "./ReadAloud";
 
 interface Props {
   notes: GeneratedNotes;
@@ -54,6 +56,15 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
   const [newName, setNewName] = useState("");
   const [genDetail, setGenDetail] = useState(String(notes.detailLevel || "2"));
   const [genLang, setGenLang] = useState(notes.language || "English");
+
+  // Add unit dialog
+  const [unitOpen, setUnitOpen] = useState(false);
+  const [newUnitName, setNewUnitName] = useState("");
+  const [newUnitNumber, setNewUnitNumber] = useState("");
+
+  // Read-aloud sentences (from rendered markdown)
+  const [sentences, setSentences] = useState<string[]>([]);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setNotes(initialNotes); }, [initialNotes]);
 
@@ -135,6 +146,30 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
     setGenDetail(String(notes.detailLevel || "2"));
     setGenLang(notes.language || "English");
     setAddOpen(true);
+  };
+
+  const openAddUnitDialog = () => {
+    const nextNum = String(notes.units.length + 1);
+    setNewUnitNumber(nextNum);
+    setNewUnitName("");
+    setUnitOpen(true);
+  };
+
+  const addUnit = async () => {
+    if (!newUnitName.trim()) { toast.error("Enter a unit name"); return; }
+    const num = newUnitNumber.trim() || String(notes.units.length + 1);
+    const next: GeneratedNotes = {
+      ...notes,
+      units: [
+        ...notes.units,
+        { unitNumber: num, unitName: newUnitName.trim(), topics: [{ topicName: "Introduction", content: "" }] },
+      ],
+    };
+    await persist(next);
+    setUnitOpen(false);
+    setActiveUnit(next.units.length - 1);
+    setActiveTopic(0);
+    toast.success("Unit added — add topics inside");
   };
 
   const insertNewTopic = async (name: string, content: string) => {
@@ -276,6 +311,12 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
               </AnimatePresence>
             </div>
           ))}
+          <button
+            onClick={openAddUnitDialog}
+            className="w-full text-left px-3 py-2 rounded-md text-sm font-medium text-primary/90 hover:text-primary hover:bg-primary/5 transition-colors flex items-center gap-1.5 border border-dashed border-primary/30 mt-2"
+          >
+            <FolderPlus className="h-3.5 w-3.5" /> Add Unit
+          </button>
         </nav>
 
         {/* Content */}
@@ -382,14 +423,32 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
                 <Textarea
                   value={draftContent}
                   onChange={(e) => setDraftContent(e.target.value)}
-                  placeholder="Write topic content or click Generate with AI…"
-                  className="min-h-[400px] font-body leading-relaxed text-base"
+                  placeholder="Write topic content (Markdown supported) or click Generate with AI…"
+                  className="min-h-[400px] font-mono leading-relaxed text-sm"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Markdown supported: **bold**, *italic*, # heading, - list, `code`, tables, etc.
+                </p>
               </div>
             ) : (
-              <div className="prose prose-sm max-w-none text-foreground/90 leading-relaxed font-body whitespace-pre-line">
-                {topic?.content || <span className="text-muted-foreground italic">No content yet. Click edit to add.</span>}
-              </div>
+              <>
+                {topic?.content ? (
+                  <>
+                    <ReadAloud
+                      containerRef={contentRef}
+                      sentences={sentences}
+                      language={notes.language || "English"}
+                    />
+                    <MarkdownContent
+                      ref={contentRef}
+                      markdown={topic.content}
+                      onSentences={setSentences}
+                    />
+                  </>
+                ) : (
+                  <p className="text-muted-foreground italic">No content yet. Click edit to add.</p>
+                )}
+              </>
             )}
 
             {/* Navigation */}
@@ -471,6 +530,34 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
             <Button onClick={addTopicWithAI} disabled={generating} className="gap-1.5">
               {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               {generating ? "Generating…" : "Generate with AI"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Unit Dialog */}
+      <Dialog open={unitOpen} onOpenChange={setUnitOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add new unit</DialogTitle>
+            <DialogDescription>Create a new unit; you can add topics inside it after.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-[100px_1fr] gap-3">
+              <div className="space-y-1.5">
+                <Label>Number</Label>
+                <Input value={newUnitNumber} onChange={(e) => setNewUnitNumber(e.target.value)} placeholder="e.g. 5" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Unit name</Label>
+                <Input value={newUnitName} onChange={(e) => setNewUnitName(e.target.value)} placeholder="e.g. Advanced Topics" autoFocus />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setUnitOpen(false)}>Cancel</Button>
+            <Button onClick={addUnit} className="gap-1.5">
+              <FolderPlus className="h-4 w-4" /> Add Unit
             </Button>
           </DialogFooter>
         </DialogContent>

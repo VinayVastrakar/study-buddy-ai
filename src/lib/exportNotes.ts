@@ -1,4 +1,5 @@
-import type { GeneratedNotes } from "@/types/notes";
+import type { GeneratedNotes, NoteUnit, NoteTopic } from "@/types/notes";
+import { renderMarkdownHtml } from "@/lib/markdown";
 
 const sanitize = (s: string) =>
   (s || "notes").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-").toLowerCase().slice(0, 60) || "notes";
@@ -15,6 +16,67 @@ const download = (blob: Blob, name: string) => {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
+
+/* -------------------- HTML builders -------------------- */
+const EXPORT_CSS = `
+  body { font-family: 'Georgia', 'DM Sans', serif; color: #1a1a1a; line-height: 1.6; padding: 24px; }
+  h1 { font-family: 'Instrument Serif', 'Georgia', serif; font-size: 32px; margin: 0 0 8px; color: #5b3a1f; }
+  h2 { font-family: 'Instrument Serif', 'Georgia', serif; font-size: 24px; margin: 28px 0 10px; color: #7a4a1c; border-bottom: 1px solid #d9c8a8; padding-bottom: 6px; }
+  h3 { font-family: 'Instrument Serif', 'Georgia', serif; font-size: 18px; margin: 20px 0 8px; color: #333; }
+  h4, h5, h6 { font-family: 'Georgia', serif; margin: 14px 0 6px; }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0 8px 24px; }
+  li { margin: 4px 0; }
+  strong { font-weight: 700; color: #222; }
+  em { font-style: italic; }
+  code { background: #f4ecd8; padding: 2px 5px; border-radius: 3px; font-family: 'Courier New', monospace; font-size: 90%; }
+  pre { background: #f4ecd8; padding: 10px; border-radius: 4px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 90%; }
+  pre code { background: transparent; padding: 0; }
+  blockquote { border-left: 3px solid #b98a3a; margin: 10px 0; padding: 4px 12px; color: #555; font-style: italic; }
+  table { border-collapse: collapse; margin: 10px 0; width: 100%; }
+  th, td { border: 1px solid #cbb98a; padding: 6px 10px; text-align: left; }
+  th { background: #f4ecd8; }
+  .meta { color: #666; font-size: 13px; margin-bottom: 20px; }
+  .topic { margin-bottom: 18px; }
+  hr { border: 0; border-top: 1px solid #d9c8a8; margin: 18px 0; }
+`;
+
+const buildFullHtml = (notes: GeneratedNotes): string => {
+  const parts: string[] = [];
+  parts.push(`<h1>${escapeHtml(notes.subject || "Study Notes")}</h1>`);
+  if (notes.course) parts.push(`<p class="meta"><em>${escapeHtml(notes.course)}</em></p>`);
+  parts.push(
+    `<p class="meta">Language: ${escapeHtml(notes.language)} &nbsp;•&nbsp; Detail Level: ${escapeHtml(notes.detailLevel)}</p>`
+  );
+  parts.push("<hr />");
+  for (const u of notes.units) {
+    parts.push(`<h2>Unit ${escapeHtml(u.unitNumber)} — ${escapeHtml(u.unitName)}</h2>`);
+    for (const t of u.topics) {
+      parts.push(`<div class="topic"><h3>${escapeHtml(t.topicName)}</h3>`);
+      parts.push(renderMarkdownHtml(t.content || ""));
+      parts.push(`</div>`);
+    }
+  }
+  return wrapDocument(notes.subject || "Study Notes", parts.join("\n"));
+};
+
+const buildTopicHtml = (subject: string, unit: NoteUnit, topic: NoteTopic): string => {
+  const body =
+    `<h1>${escapeHtml(topic.topicName)}</h1>` +
+    `<p class="meta">${escapeHtml(subject)} &nbsp;•&nbsp; Unit ${escapeHtml(unit.unitNumber)}: ${escapeHtml(unit.unitName)}</p>` +
+    `<hr />` +
+    renderMarkdownHtml(topic.content || "");
+  return wrapDocument(topic.topicName, body);
+};
+
+const wrapDocument = (title: string, body: string): string => `
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>${EXPORT_CSS}</style></head>
+<body>${body}</body></html>`;
+
+const escapeHtml = (s: string) =>
+  (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
 /* -------------------- JSON -------------------- */
 export function exportJSON(notes: GeneratedNotes) {
@@ -33,7 +95,7 @@ export function exportMarkdown(notes: GeneratedNotes) {
     lines.push(`\n## Unit ${u.unitNumber} — ${u.unitName}\n`);
     for (const t of u.topics) {
       lines.push(`\n### ${t.topicName}\n`);
-      lines.push(t.content.trim());
+      lines.push((t.content || "").trim());
       lines.push("");
     }
   }
@@ -41,127 +103,71 @@ export function exportMarkdown(notes: GeneratedNotes) {
   download(blob, filename(notes, "md"));
 }
 
-/* -------------------- PDF -------------------- */
-export async function exportPDF(notes: GeneratedNotes) {
-  const { jsPDF } = await import("jspdf");
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 48;
-  const maxW = pageW - margin * 2;
-  let y = margin;
-
-  const ensureSpace = (needed: number) => {
-    if (y + needed > pageH - margin) {
-      doc.addPage();
-      y = margin;
-    }
-  };
-
-  const writeLines = (text: string, size: number, style: "normal" | "bold" | "italic" = "normal", lineGap = 4) => {
-    doc.setFont("helvetica", style);
-    doc.setFontSize(size);
-    const lines = doc.splitTextToSize(text, maxW) as string[];
-    const lineH = size * 1.25;
-    for (const line of lines) {
-      ensureSpace(lineH);
-      doc.text(line, margin, y);
-      y += lineH;
-    }
-    y += lineGap;
-  };
-
-  // Title page
-  writeLines(notes.subject || "Study Notes", 26, "bold", 8);
-  if (notes.course) writeLines(notes.course, 14, "italic", 4);
-  writeLines(`Language: ${notes.language}   •   Detail Level: ${notes.detailLevel}`, 11, "normal", 8);
-  doc.setDrawColor(180);
-  doc.line(margin, y, pageW - margin, y);
-  y += 16;
-
-  for (const u of notes.units) {
-    ensureSpace(60);
-    writeLines(`Unit ${u.unitNumber} — ${u.unitName}`, 18, "bold", 6);
-    for (const t of u.topics) {
-      ensureSpace(40);
-      writeLines(t.topicName, 13, "bold", 4);
-      writeLines(t.content.trim(), 11, "normal", 10);
-    }
+/* -------------------- PDF (formatted from HTML) -------------------- */
+async function htmlToPdf(html: string, filename: string) {
+  const html2pdf: any = (await import("html2pdf.js")).default;
+  // Render into an off-screen container so html2canvas can measure it.
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.left = "-10000px";
+  container.style.top = "0";
+  container.style.width = "800px";
+  container.style.background = "#fff";
+  container.innerHTML = html;
+  document.body.appendChild(container);
+  try {
+    await html2pdf()
+      .from(container)
+      .set({
+        margin: [12, 12, 12, 12],
+        filename,
+        image: { type: "jpeg", quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        pagebreak: { mode: ["css", "legacy"] },
+      })
+      .save();
+  } finally {
+    container.remove();
   }
-
-  doc.save(filename(notes, "pdf"));
 }
 
-/* -------------------- DOCX -------------------- */
+export async function exportPDF(notes: GeneratedNotes) {
+  await htmlToPdf(buildFullHtml(notes), filename(notes, "pdf"));
+}
+
+/* -------------------- DOCX (from HTML → keeps formatting) -------------------- */
+async function htmlToDocx(html: string, name: string) {
+  const { asBlob } = await import("html-docx-js-typescript");
+  const result = await asBlob(html);
+  const blob = result instanceof Blob
+    ? result
+    : new Blob([result as unknown as ArrayBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      });
+  download(blob, name);
+}
+
 export async function exportDOCX(notes: GeneratedNotes) {
-  const { Document, Packer, Paragraph, HeadingLevel, TextRun, AlignmentType } = await import("docx");
-
-  const children: any[] = [
-    new Paragraph({
-      heading: HeadingLevel.HEADING_1,
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: notes.subject || "Study Notes", bold: true })],
-    }),
-  ];
-  if (notes.course) {
-    children.push(
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: [new TextRun({ text: notes.course, italics: true })],
-      })
-    );
-  }
-  children.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: `Language: ${notes.language}  •  Detail Level: ${notes.detailLevel}`, size: 20 })],
-    }),
-    new Paragraph({ children: [new TextRun("")] })
-  );
-
-  for (const u of notes.units) {
-    children.push(
-      new Paragraph({
-        heading: HeadingLevel.HEADING_2,
-        children: [new TextRun({ text: `Unit ${u.unitNumber} — ${u.unitName}`, bold: true })],
-      })
-    );
-    for (const t of u.topics) {
-      children.push(
-        new Paragraph({
-          heading: HeadingLevel.HEADING_3,
-          children: [new TextRun({ text: t.topicName, bold: true })],
-        })
-      );
-      const paragraphs = t.content.split(/\n\s*\n/);
-      for (const p of paragraphs) {
-        children.push(
-          new Paragraph({
-            children: [new TextRun(p.replace(/\n/g, " ").trim())],
-            spacing: { after: 120 },
-          })
-        );
-      }
-    }
-  }
-
-  const doc = new Document({ sections: [{ children }] });
-  const blob = await Packer.toBlob(doc);
-  download(blob, filename(notes, "docx"));
+  await htmlToDocx(buildFullHtml(notes), filename(notes, "docx"));
 }
 
 /* -------------------- Per-topic exports -------------------- */
-import type { NoteUnit, NoteTopic } from "@/types/notes";
+const topicFilename = (subject: string, topic: NoteTopic, ext: string) =>
+  `${sanitize(subject)}-${sanitize(topic.topicName)}.${ext}`;
 
-const topicNotes = (subject: string, unit: NoteUnit, topic: NoteTopic): GeneratedNotes => ({
-  subject: `${subject} — ${topic.topicName}`,
-  course: `Unit ${unit.unitNumber}: ${unit.unitName}`,
-  language: "",
-  detailLevel: "",
-  units: [{ unitNumber: unit.unitNumber, unitName: unit.unitName, topics: [topic] }],
-});
+export const exportTopicPDF = (s: string, u: NoteUnit, t: NoteTopic) =>
+  htmlToPdf(buildTopicHtml(s, u, t), topicFilename(s, t, "pdf"));
 
-export const exportTopicPDF = (s: string, u: NoteUnit, t: NoteTopic) => exportPDF(topicNotes(s, u, t));
-export const exportTopicDOCX = (s: string, u: NoteUnit, t: NoteTopic) => exportDOCX(topicNotes(s, u, t));
-export const exportTopicMarkdown = (s: string, u: NoteUnit, t: NoteTopic) => exportMarkdown(topicNotes(s, u, t));
-export const exportTopicJSON = (s: string, u: NoteUnit, t: NoteTopic) => exportJSON(topicNotes(s, u, t));
+export const exportTopicDOCX = (s: string, u: NoteUnit, t: NoteTopic) =>
+  htmlToDocx(buildTopicHtml(s, u, t), topicFilename(s, t, "docx"));
+
+export const exportTopicMarkdown = (s: string, u: NoteUnit, t: NoteTopic) => {
+  const md = `# ${t.topicName}\n\n_${s} — Unit ${u.unitNumber}: ${u.unitName}_\n\n---\n\n${t.content || ""}\n`;
+  download(new Blob([md], { type: "text/markdown;charset=utf-8" }), topicFilename(s, t, "md"));
+};
+
+export const exportTopicJSON = (s: string, u: NoteUnit, t: NoteTopic) => {
+  const payload = { subject: s, unit: { unitNumber: u.unitNumber, unitName: u.unitName }, topic: t };
+  download(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), topicFilename(s, t, "json"));
+};
