@@ -1,4 +1,4 @@
-import { forwardRef, useMemo } from "react";
+import { forwardRef, useEffect, useMemo } from "react";
 import { renderMarkdownWithSentences } from "@/lib/markdown";
 
 interface Props {
@@ -10,8 +10,8 @@ interface Props {
 const MarkdownContent = forwardRef<HTMLDivElement, Props>(({ markdown, className, onSentences }, ref) => {
   const { html, sentences } = useMemo(() => renderMarkdownWithSentences(markdown), [markdown]);
 
-  // notify parent about sentences (post-render)
-  useMemo(() => { onSentences?.(sentences); }, [sentences, onSentences]);
+  useEffect(() => { onSentences?.(sentences); }, [sentences, onSentences]);
+
 
   return (
     <div
