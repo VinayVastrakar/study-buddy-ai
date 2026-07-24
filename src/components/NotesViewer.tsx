@@ -153,24 +153,44 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
     const nextNum = String(notes.units.length + 1);
     setNewUnitNumber(nextNum);
     setNewUnitName("");
+    setNewUnitTopic("");
+    setGenDetail(String(notes.detailLevel || "2"));
+    setGenLang(notes.language || "English");
     setUnitOpen(true);
   };
 
-  const addUnit = async () => {
+  const addUnit = async (opts?: { withAI?: boolean }) => {
     if (!newUnitName.trim()) { toast.error("Enter a unit name"); return; }
     const num = newUnitNumber.trim() || String(notes.units.length + 1);
+    const unitName = newUnitName.trim();
+    const topicName = newUnitTopic.trim();
+
+    let firstTopic = { topicName: topicName || "Introduction", content: "" };
+
+    if (opts?.withAI) {
+      if (!topicName) { toast.error("Enter a topic name to generate with AI"); return; }
+      setGenerating(true);
+      try {
+        const content = await callAI(topicName, unitName, genDetail, genLang);
+        firstTopic = { topicName, content };
+      } catch (e) {
+        console.error(e);
+        toast.error(e instanceof Error ? e.message : "Generation failed");
+        setGenerating(false);
+        return;
+      }
+      setGenerating(false);
+    }
+
     const next: GeneratedNotes = {
       ...notes,
-      units: [
-        ...notes.units,
-        { unitNumber: num, unitName: newUnitName.trim(), topics: [{ topicName: "Introduction", content: "" }] },
-      ],
+      units: [...notes.units, { unitNumber: num, unitName, topics: [firstTopic] }],
     };
     await persist(next);
     setUnitOpen(false);
     setActiveUnit(next.units.length - 1);
     setActiveTopic(0);
-    toast.success("Unit added — add topics inside");
+    toast.success(opts?.withAI ? "Unit + AI topic added" : "Unit added");
   };
 
   const insertNewTopic = async (name: string, content: string) => {
