@@ -103,30 +103,37 @@ export function exportMarkdown(notes: GeneratedNotes) {
   download(blob, filename(notes, "md"));
 }
 
-/* -------------------- PDF (formatted from HTML) -------------------- */
-async function htmlToPdf(html: string, filename: string) {
-  const html2pdf: any = (await import("html2pdf.js")).default;
-  // Render into an off-screen container so html2canvas can measure it.
+/* -------------------- PDF (formatted from HTML via jsPDF.html) -------------------- */
+async function htmlToPdf(html: string, name: string) {
+  const { jsPDF } = await import("jspdf");
+  // Parse full doc → extract <body> so jsPDF renders only the body content.
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const bodyHtml = doc.body.innerHTML;
+  const styleTag = doc.querySelector("style")?.innerHTML || "";
+
   const container = document.createElement("div");
   container.style.position = "fixed";
   container.style.left = "-10000px";
   container.style.top = "0";
-  container.style.width = "800px";
-  container.style.background = "#fff";
-  container.innerHTML = html;
+  container.style.width = "780px";
+  container.style.background = "#ffffff";
+  container.innerHTML = `<style>${styleTag}</style><div class="pdf-root">${bodyHtml}</div>`;
   document.body.appendChild(container);
+
   try {
-    await html2pdf()
-      .from(container)
-      .set({
-        margin: [12, 12, 12, 12],
-        filename,
-        image: { type: "jpeg", quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-        pagebreak: { mode: ["css", "legacy"] },
-      })
-      .save();
+    const pdf = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const margin = 36; // ~0.5in
+    await pdf.html(container, {
+      x: margin,
+      y: margin,
+      width: pageWidth - margin * 2,
+      windowWidth: 780,
+      autoPaging: "text",
+      margin: [margin, margin, margin, margin],
+      html2canvas: { scale: 0.75, useCORS: true, backgroundColor: "#ffffff", letterRendering: true },
+    });
+    pdf.save(name);
   } finally {
     container.remove();
   }
