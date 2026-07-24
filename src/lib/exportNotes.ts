@@ -112,11 +112,15 @@ async function htmlToPdf(html: string, name: string) {
   const styleTag = doc.querySelector("style")?.innerHTML || "";
 
   const container = document.createElement("div");
-  container.style.position = "fixed";
-  container.style.left = "-10000px";
+  // Keep the export DOM inside the viewport while jsPDF/html2canvas measures it.
+  // Rendering it far off-screen can create a valid but completely blank PDF in Chromium.
+  container.style.position = "absolute";
+  container.style.left = "0";
   container.style.top = "0";
   container.style.width = "780px";
   container.style.background = "#ffffff";
+  container.style.zIndex = "-1";
+  container.style.pointerEvents = "none";
   container.innerHTML = `<style>${styleTag}</style><div class="pdf-root">${bodyHtml}</div>`;
   document.body.appendChild(container);
 
