@@ -61,6 +61,7 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
   const [unitOpen, setUnitOpen] = useState(false);
   const [newUnitName, setNewUnitName] = useState("");
   const [newUnitNumber, setNewUnitNumber] = useState("");
+  const [newUnitTopic, setNewUnitTopic] = useState("");
 
   // Read-aloud sentences (from rendered markdown)
   const [sentences, setSentences] = useState<string[]>([]);
