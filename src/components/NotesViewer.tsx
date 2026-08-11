@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen, ChevronRight, ArrowLeft, GraduationCap, Download,
-  Pencil, Plus, Save, X, Trash2, Sparkles, Loader2,
+  Pencil, Plus, Save, X, Trash2, Sparkles, Loader2, FolderPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { GeneratedNotes } from "@/types/notes";
@@ -24,6 +24,8 @@ import {
   exportTopicPDF, exportTopicDOCX, exportTopicMarkdown, exportTopicJSON,
 } from "@/lib/exportNotes";
 import { supabase } from "@/integrations/supabase/client";
+import MarkdownContent from "./MarkdownContent";
+import ReadAloud from "./ReadAloud";
 
 interface Props {
   notes: GeneratedNotes;
@@ -54,6 +56,16 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
   const [newName, setNewName] = useState("");
   const [genDetail, setGenDetail] = useState(String(notes.detailLevel || "2"));
   const [genLang, setGenLang] = useState(notes.language || "English");
+
+  // Add unit dialog
+  const [unitOpen, setUnitOpen] = useState(false);
+  const [newUnitName, setNewUnitName] = useState("");
+  const [newUnitNumber, setNewUnitNumber] = useState("");
+  const [newUnitTopic, setNewUnitTopic] = useState("");
+
+  // Read-aloud sentences (from rendered markdown)
+  const [sentences, setSentences] = useState<string[]>([]);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setNotes(initialNotes); }, [initialNotes]);
 
@@ -135,6 +147,50 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
     setGenDetail(String(notes.detailLevel || "2"));
     setGenLang(notes.language || "English");
     setAddOpen(true);
+  };
+
+  const openAddUnitDialog = () => {
+    const nextNum = String(notes.units.length + 1);
+    setNewUnitNumber(nextNum);
+    setNewUnitName("");
+    setNewUnitTopic("");
+    setGenDetail(String(notes.detailLevel || "2"));
+    setGenLang(notes.language || "English");
+    setUnitOpen(true);
+  };
+
+  const addUnit = async (opts?: { withAI?: boolean }) => {
+    if (!newUnitName.trim()) { toast.error("Enter a unit name"); return; }
+    const num = newUnitNumber.trim() || String(notes.units.length + 1);
+    const unitName = newUnitName.trim();
+    const topicName = newUnitTopic.trim();
+
+    let firstTopic = { topicName: topicName || "Introduction", content: "" };
+
+    if (opts?.withAI) {
+      if (!topicName) { toast.error("Enter a topic name to generate with AI"); return; }
+      setGenerating(true);
+      try {
+        const content = await callAI(topicName, unitName, genDetail, genLang);
+        firstTopic = { topicName, content };
+      } catch (e) {
+        console.error(e);
+        toast.error(e instanceof Error ? e.message : "Generation failed");
+        setGenerating(false);
+        return;
+      }
+      setGenerating(false);
+    }
+
+    const next: GeneratedNotes = {
+      ...notes,
+      units: [...notes.units, { unitNumber: num, unitName, topics: [firstTopic] }],
+    };
+    await persist(next);
+    setUnitOpen(false);
+    setActiveUnit(next.units.length - 1);
+    setActiveTopic(0);
+    toast.success(opts?.withAI ? "Unit + AI topic added" : "Unit added");
   };
 
   const insertNewTopic = async (name: string, content: string) => {
@@ -276,6 +332,12 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
               </AnimatePresence>
             </div>
           ))}
+          <button
+            onClick={openAddUnitDialog}
+            className="w-full text-left px-3 py-2 rounded-md text-sm font-medium text-primary/90 hover:text-primary hover:bg-primary/5 transition-colors flex items-center gap-1.5 border border-dashed border-primary/30 mt-2"
+          >
+            <FolderPlus className="h-3.5 w-3.5" /> Add Unit
+          </button>
         </nav>
 
         {/* Content */}
@@ -382,14 +444,32 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
                 <Textarea
                   value={draftContent}
                   onChange={(e) => setDraftContent(e.target.value)}
-                  placeholder="Write topic content or click Generate with AI…"
-                  className="min-h-[400px] font-body leading-relaxed text-base"
+                  placeholder="Write topic content (Markdown supported) or click Generate with AI…"
+                  className="min-h-[400px] font-mono leading-relaxed text-sm"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Markdown supported: **bold**, *italic*, # heading, - list, `code`, tables, etc.
+                </p>
               </div>
             ) : (
-              <div className="prose prose-sm max-w-none text-foreground/90 leading-relaxed font-body whitespace-pre-line">
-                {topic?.content || <span className="text-muted-foreground italic">No content yet. Click edit to add.</span>}
-              </div>
+              <>
+                {topic?.content ? (
+                  <>
+                    <ReadAloud
+                      containerRef={contentRef}
+                      sentences={sentences}
+                      language={notes.language || "English"}
+                    />
+                    <MarkdownContent
+                      ref={contentRef}
+                      markdown={topic.content}
+                      onSentences={setSentences}
+                    />
+                  </>
+                ) : (
+                  <p className="text-muted-foreground italic">No content yet. Click edit to add.</p>
+                )}
+              </>
             )}
 
             {/* Navigation */}
@@ -471,6 +551,66 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
             <Button onClick={addTopicWithAI} disabled={generating} className="gap-1.5">
               {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               {generating ? "Generating…" : "Generate with AI"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Unit Dialog */}
+      <Dialog open={unitOpen} onOpenChange={(o) => !generating && setUnitOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add new unit</DialogTitle>
+            <DialogDescription>Create a unit, optionally with a first topic generated by AI.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-[100px_1fr] gap-3">
+              <div className="space-y-1.5">
+                <Label>Number</Label>
+                <Input value={newUnitNumber} onChange={(e) => setNewUnitNumber(e.target.value)} placeholder="e.g. 5" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Unit name</Label>
+                <Input value={newUnitName} onChange={(e) => setNewUnitName(e.target.value)} placeholder="e.g. Advanced Topics" autoFocus />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>First topic (optional)</Label>
+              <Input value={newUnitTopic} onChange={(e) => setNewUnitTopic(e.target.value)} placeholder="e.g. Reactive Streams" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Detail Level</Label>
+                <Select value={genDetail} onValueChange={setGenDetail}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(DETAIL_LABELS).map(([v, l]) => (
+                      <SelectItem key={v} value={v}>Level {v} — {l}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Language</Label>
+                <Select value={genLang} onValueChange={setGenLang}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="English">English</SelectItem>
+                    <SelectItem value="Hinglish">Hinglish</SelectItem>
+                    <SelectItem value="Hindi">Hindi</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="ghost" onClick={() => setUnitOpen(false)} disabled={generating}>Cancel</Button>
+            <Button variant="secondary" onClick={() => addUnit()} disabled={generating} className="gap-1.5">
+              <FolderPlus className="h-4 w-4" /> Add Unit
+            </Button>
+            <Button onClick={() => addUnit({ withAI: true })} disabled={generating} className="gap-1.5">
+              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {generating ? "Generating…" : "Add + Generate topic"}
             </Button>
           </DialogFooter>
         </DialogContent>
