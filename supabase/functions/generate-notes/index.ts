@@ -91,7 +91,7 @@ Do NOT include markdown outside JSON. Do NOT include explanations outside JSON. 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gemini-3.1-pro",
+        model: "gemini-3.6-flash",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `Here is the syllabus text:\n\n${syllabusText}` },

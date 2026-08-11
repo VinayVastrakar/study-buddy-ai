@@ -56,7 +56,7 @@ OUTPUT: Return ONLY valid JSON: {"content": "..."} — no markdown fences, no ex
       method: "POST",
       headers: { Authorization: `Bearer ${useUserKey ? userApiKey : LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "gemini-3.1-pro",
+        model: "gemini-3.6-flash",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `Generate notes for topic: "${topicName}".` },
