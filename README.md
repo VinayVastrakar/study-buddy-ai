@@ -1,73 +1,121 @@
-# Welcome to your Lovable project
+# Study Buddy AI 📚
 
-## Project info
+Study Buddy AI is an intelligent, AI-powered study assistant that transforms your raw syllabus or study materials into perfectly structured, exam-ready notes in seconds. Built with React, Vite, Tailwind CSS, and powered by Supabase and Google Gemini.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## ✨ Features
 
-## How can I edit this code?
+- **Auth System:** Secure Email/Password and Google OAuth login via Supabase.
+- **Smart Notes Generation:** Paste your syllabus text or upload a file to automatically generate structured notes.
+- **Customizable Detail Levels:** Choose from Short Notes, Exam Ready (5-8 marks), Deep Explanation (10-15 marks), or Teaching Mode.
+- **Multilingual Support:** Generate notes in English, Hinglish, and more.
+- **Rich Text & Exporting:** View your notes in a clean markdown viewer and easily export them to DOCX format.
+- **Read Aloud:** Built-in text-to-speech feature to listen to your notes.
+- **Notes History:** Automatically saves your generated notes to your personal dashboard so you can revisit them anytime.
 
-There are several ways of editing your application.
+---
 
-**Use Lovable**
+## 📸 Screenshots
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+*(Add your screenshots to a `docs` folder and uncomment these lines)*
 
-Changes made via Lovable will be committed automatically to this repo.
+<!--
+### Welcome / Login Screen
+![Login Screen](./docs/login.png)
 
-**Use your preferred IDE**
+### Dashboard & Syllabus Upload
+![Dashboard](./docs/dashboard.png)
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Generated Notes View
+![Notes View](./docs/notes.png)
+-->
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+---
 
-Follow these steps:
+## 🚀 Getting Started
+
+Follow these steps to set up the project locally.
+
+### 1. Prerequisites
+- [Node.js](https://nodejs.org/) & npm installed.
+- A [Supabase](https://supabase.com) account (for database, auth, and edge functions).
+- A [Google Gemini API Key](https://aistudio.google.com/app/apikey).
+
+### 2. Local Setup
+
+Clone the repository and install dependencies:
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
 git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+cd study-buddy-ai
+npm install
 ```
 
-**Edit a file directly in GitHub**
+### 3. Environment Variables
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+Create a `.env` file in the root directory and add your Supabase project details (You can find these in your Supabase Dashboard under **Settings > API**):
 
-**Use GitHub Codespaces**
+```env
+VITE_SUPABASE_PROJECT_ID="your_supabase_project_id"
+VITE_SUPABASE_URL="https://your_supabase_project_id.supabase.co"
+VITE_SUPABASE_PUBLISHABLE_KEY="your_supabase_anon_public_key"
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### 4. Supabase Backend Setup (Database & AI Functions)
 
-## What technologies are used for this project?
+Since this app uses Supabase Edge Functions for communicating with Gemini AI, you need to push the backend code to your Supabase project.
 
-This project is built with:
+1. **Login to Supabase CLI:**
+   ```sh
+   npx supabase login
+   ```
+2. **Link your project:**
+   ```sh
+   npx supabase link --project-ref your_supabase_project_id
+   ```
+3. **Push the Database Schema:**
+   ```sh
+   npx supabase db push
+   ```
+4. **Set your Gemini API Key as a Secret:**
+   This allows the Edge Functions to access the AI.
+   ```sh
+   npx supabase secrets set GEMINI_API_KEY="AIzaSy...your_gemini_key"
+   ```
+5. **Deploy the Edge Functions:**
+   ```sh
+   npx supabase functions deploy
+   ```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+### 5. Run the App
 
-## How can I deploy this project?
+Start the development server:
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+```sh
+npm run dev
+```
+Open [http://localhost:8080](http://localhost:8080) in your browser to see the app!
 
-## Can I connect a custom domain to my Lovable project?
+---
 
-Yes, you can!
+## 📖 User Guide
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+### Generating Notes
+1. **Login** to the application using your account.
+2. On the main dashboard, **paste your syllabus text** into the input box (or upload a `.txt`/`.md` file).
+3. **Select Detail Level**: Choose how in-depth you want the notes. For exam prep, "Exam Ready" is recommended.
+4. **Select Language**: Pick the language for the output (e.g., English or Hinglish).
+5. Click **Generate Notes**. The AI will process the syllabus and stream the structured notes to your screen.
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+### Managing Notes
+- Click the **History** button to view all your previously generated study sessions.
+- Use the **Read Aloud** button to listen to the notes.
+- Use the **Export** button to download your notes as a DOCX file for offline viewing or printing.
+
+---
+
+## 🛠️ Technologies Used
+
+- **Frontend:** React, Vite, TypeScript, Tailwind CSS, shadcn-ui, Framer Motion
+- **Backend & Auth:** Supabase (PostgreSQL, Auth, Edge Functions)
+- **AI Integration:** Google Gemini 3.6 Flash (via Edge Functions)
+- **Markdown parsing:** react-markdown, marked

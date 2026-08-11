@@ -24,8 +24,8 @@ serve(async (req) => {
     }
 
     const useUserKey = !!userApiKey;
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!useUserKey && !LOVABLE_API_KEY) throw new Error("No API key available. Add your Gemini API key in settings.");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!useUserKey && !GEMINI_API_KEY) throw new Error("No API key available. Add your Gemini API key in settings.");
 
     const detailInstruction = DETAIL_PROMPTS[String(detailLevel)] || DETAIL_PROMPTS["2"];
 
@@ -54,7 +54,7 @@ OUTPUT: Return ONLY valid JSON: {"content": "..."} — no markdown fences, no ex
 
     const response = await fetch(apiUrl, {
       method: "POST",
-      headers: { Authorization: `Bearer ${useUserKey ? userApiKey : LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${useUserKey ? userApiKey : GEMINI_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "gemini-3.6-flash",
         messages: [

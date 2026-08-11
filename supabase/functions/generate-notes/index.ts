@@ -30,8 +30,8 @@ serve(async (req) => {
 
     // Determine which API to use
     const useUserKey = !!userApiKey;
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!useUserKey && !LOVABLE_API_KEY) throw new Error("No API key available. Please add your Gemini API key in settings.");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!useUserKey && !GEMINI_API_KEY) throw new Error("No API key available. Please add your Gemini API key in settings.");
 
     const detailInstruction = DETAIL_PROMPTS[String(detailLevel)] || DETAIL_PROMPTS["2"];
 
@@ -82,7 +82,7 @@ Do NOT include markdown outside JSON. Do NOT include explanations outside JSON. 
 
     const apiUrl = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
-    const authHeader = `Bearer ${useUserKey ? userApiKey : LOVABLE_API_KEY}`;
+    const authHeader = `Bearer ${useUserKey ? userApiKey : GEMINI_API_KEY}`;
 
     const response = await fetch(apiUrl, {
       method: "POST",
