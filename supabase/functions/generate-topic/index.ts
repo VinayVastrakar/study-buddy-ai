@@ -50,15 +50,13 @@ LANGUAGE: ${language}. Short clear sentences. Human, natural, exam-focused tone.
 
 OUTPUT: Return ONLY valid JSON: {"content": "..."} — no markdown fences, no extra text. The content string may contain \\n for line breaks.`;
 
-    const apiUrl = useUserKey
-      ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-      : "https://ai.gateway.lovable.dev/v1/chat/completions";
+    const apiUrl = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
     const response = await fetch(apiUrl, {
       method: "POST",
       headers: { Authorization: `Bearer ${useUserKey ? userApiKey : LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: useUserKey ? "gemini-2.5-flash" : "google/gemini-2.5-flash",
+        model: "gemini-3.1-pro",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `Generate notes for topic: "${topicName}".` },

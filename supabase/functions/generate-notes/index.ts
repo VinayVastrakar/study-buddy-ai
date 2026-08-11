@@ -80,14 +80,9 @@ OUTPUT: Return ONLY valid JSON with this structure:
 
 Do NOT include markdown outside JSON. Do NOT include explanations outside JSON. JSON must be parseable.`;
 
-    // Call either Google Gemini directly or Lovable AI gateway
-    const apiUrl = useUserKey
-      ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-      : "https://ai.gateway.lovable.dev/v1/chat/completions";
+    const apiUrl = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
-    const authHeader = useUserKey
-      ? `Bearer ${userApiKey}`
-      : `Bearer ${LOVABLE_API_KEY}`;
+    const authHeader = `Bearer ${useUserKey ? userApiKey : LOVABLE_API_KEY}`;
 
     const response = await fetch(apiUrl, {
       method: "POST",
@@ -96,7 +91,7 @@ Do NOT include markdown outside JSON. Do NOT include explanations outside JSON. 
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: useUserKey ? "gemini-2.5-flash" : "google/gemini-2.5-flash",
+        model: "gemini-3.1-pro",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `Here is the syllabus text:\n\n${syllabusText}` },
