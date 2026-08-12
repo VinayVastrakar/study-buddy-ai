@@ -2,14 +2,15 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen, ChevronRight, ArrowLeft, GraduationCap, Download,
-  Pencil, Plus, Save, X, Trash2, Sparkles, Loader2, FolderPlus,
+  Pencil, Plus, Save, X, Trash2, Sparkles, Loader2, FolderPlus, Upload,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { GeneratedNotes } from "@/types/notes";
+import type { GeneratedNotes, NoteUnit } from "@/types/notes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -23,9 +24,11 @@ import {
   exportPDF, exportDOCX, exportMarkdown, exportJSON,
   exportTopicPDF, exportTopicDOCX, exportTopicMarkdown, exportTopicJSON,
 } from "@/lib/exportNotes";
+import { parseImportFile } from "@/lib/importNotes";
 import { supabase } from "@/integrations/supabase/client";
 import MarkdownContent from "./MarkdownContent";
 import ReadAloud from "./ReadAloud";
+
 
 interface Props {
   notes: GeneratedNotes;
@@ -49,19 +52,31 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
   const [draftContent, setDraftContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
-  // Add topic dialog
+  // Add topic dialog (multi)
   const [addOpen, setAddOpen] = useState(false);
   const [addUnitIdx, setAddUnitIdx] = useState(0);
   const [newName, setNewName] = useState("");
   const [genDetail, setGenDetail] = useState(String(notes.detailLevel || "2"));
   const [genLang, setGenLang] = useState(notes.language || "English");
 
-  // Add unit dialog
+  // Add unit dialog (multi topics)
   const [unitOpen, setUnitOpen] = useState(false);
   const [newUnitName, setNewUnitName] = useState("");
   const [newUnitNumber, setNewUnitNumber] = useState("");
   const [newUnitTopic, setNewUnitTopic] = useState("");
+
+  // Import dialog
+  const [importOpen, setImportOpen] = useState(false);
+  const [importUnits, setImportUnits] = useState<NoteUnit[]>([]);
+  const [importSkipped, setImportSkipped] = useState<Set<string>>(new Set());
+  const [importMode, setImportMode] = useState<"units" | "topics">("units");
+  const [importRegen, setImportRegen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+
 
   // Read-aloud sentences (from rendered markdown)
   const [sentences, setSentences] = useState<string[]>([]);
@@ -159,61 +174,97 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
     setUnitOpen(true);
   };
 
-  const addUnit = async (opts?: { withAI?: boolean }) => {
+  /** Split a textarea value into a list of topic names. */
+  const parseNames = (raw: string): string[] =>
+    raw
+      .split(/\r?\n|,/)
+      .map((s) => s.replace(/^[-*•\d.)\s]+/, "").trim())
+      .filter(Boolean);
+
+  /** Generate content for many topics with a small concurrency limit. */
+  const generateMany = async (
+    names: string[],
+    unitName: string,
+    detailLevel: string,
+    language: string
+  ): Promise<{ topicName: string; content: string }[]> => {
+    const results: { topicName: string; content: string }[] = names.map((n) => ({ topicName: n, content: "" }));
+    let done = 0;
+    let failures = 0;
+    setProgress({ done: 0, total: names.length });
+
+    const queue = names.map((n, i) => ({ n, i }));
+    const worker = async () => {
+      for (;;) {
+        const job = queue.shift();
+        if (!job) return;
+        try {
+          results[job.i].content = await callAI(job.n, unitName, detailLevel, language);
+        } catch (e) {
+          console.error("generate failed for", job.n, e);
+          failures++;
+        }
+        done++;
+        setProgress({ done, total: names.length });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, names.length) }, worker));
+    setProgress(null);
+    if (failures) toast.error(`${failures} of ${names.length} topics could not be generated — added as empty`);
+    return results;
+  };
+
+  const addUnit = async (opts?: { withAI?: boolean; topicsOnly?: boolean }) => {
     if (!newUnitName.trim()) { toast.error("Enter a unit name"); return; }
     const num = newUnitNumber.trim() || String(notes.units.length + 1);
     const unitName = newUnitName.trim();
-    const topicName = newUnitTopic.trim();
+    const names = parseNames(newUnitTopic);
 
-    let firstTopic = { topicName: topicName || "Introduction", content: "" };
+    let topics = (names.length ? names : ["Introduction"]).map((n) => ({ topicName: n, content: "" }));
 
     if (opts?.withAI) {
-      if (!topicName) { toast.error("Enter a topic name to generate with AI"); return; }
+      if (!names.length) { toast.error("Enter at least one topic name to generate"); return; }
       setGenerating(true);
       try {
-        const content = await callAI(topicName, unitName, genDetail, genLang);
-        firstTopic = { topicName, content };
-      } catch (e) {
-        console.error(e);
-        toast.error(e instanceof Error ? e.message : "Generation failed");
+        topics = await generateMany(names, unitName, genDetail, genLang);
+      } finally {
         setGenerating(false);
-        return;
       }
-      setGenerating(false);
     }
 
     const next: GeneratedNotes = {
       ...notes,
-      units: [...notes.units, { unitNumber: num, unitName, topics: [firstTopic] }],
+      units: [...notes.units, { unitNumber: num, unitName, topics }],
     };
     await persist(next);
     setUnitOpen(false);
     setActiveUnit(next.units.length - 1);
     setActiveTopic(0);
-    toast.success(opts?.withAI ? "Unit + AI topic added" : "Unit added");
+    toast.success(`Unit added with ${topics.length} topic${topics.length > 1 ? "s" : ""}`);
   };
 
-  const insertNewTopic = async (name: string, content: string) => {
+  const insertTopics = async (unitIdx: number, list: { topicName: string; content: string }[]) => {
     const next: GeneratedNotes = {
       ...notes,
       units: notes.units.map((u, ui) =>
-        ui !== addUnitIdx ? u : { ...u, topics: [...u.topics, { topicName: name, content }] }
+        ui !== unitIdx ? u : { ...u, topics: [...u.topics, ...list] }
       ),
     };
     await persist(next);
-    setActiveUnit(addUnitIdx);
-    setActiveTopic(next.units[addUnitIdx].topics.length - 1);
+    setActiveUnit(unitIdx);
+    setActiveTopic(Math.max(0, next.units[unitIdx].topics.length - list.length));
     setAddOpen(false);
   };
 
   const addTopicWithAI = async () => {
-    if (!newName.trim()) { toast.error("Enter a topic name"); return; }
+    const names = parseNames(newName);
+    if (!names.length) { toast.error("Enter at least one topic name"); return; }
     setGenerating(true);
     try {
       const targetUnit = notes.units[addUnitIdx];
-      const content = await callAI(newName.trim(), targetUnit?.unitName || "", genDetail, genLang);
-      await insertNewTopic(newName.trim(), content);
-      toast.success("Topic added with AI content");
+      const list = await generateMany(names, targetUnit?.unitName || "", genDetail, genLang);
+      await insertTopics(addUnitIdx, list);
+      toast.success(`${list.length} topic${list.length > 1 ? "s" : ""} added with AI content`);
     } catch (e) {
       console.error(e);
       toast.error(e instanceof Error ? e.message : "Generation failed");
@@ -223,13 +274,115 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
   };
 
   const addTopicEmpty = async () => {
-    if (!newName.trim()) { toast.error("Enter a topic name"); return; }
-    await insertNewTopic(newName.trim(), "");
-    setDraftName(newName.trim());
-    setDraftContent("");
-    setEditing(true);
-    toast.success("Topic added — start writing");
+    const names = parseNames(newName);
+    if (!names.length) { toast.error("Enter at least one topic name"); return; }
+    await insertTopics(addUnitIdx, names.map((n) => ({ topicName: n, content: "" })));
+    toast.success(`${names.length} topic${names.length > 1 ? "s" : ""} added`);
   };
+
+  // ---------- Import (docx / md / json / pdf) ----------
+  const openImport = (mode: "units" | "topics", unitIdx?: number) => {
+    setImportMode(mode);
+    if (typeof unitIdx === "number") setAddUnitIdx(unitIdx);
+    setImportUnits([]);
+    setImportSkipped(new Set());
+    setImportRegen(false);
+    setImportOpen(true);
+  };
+
+  const handleImportFile = async (file: File) => {
+    setImporting(true);
+    try {
+      const parsed = await parseImportFile(file);
+      if (!parsed.units.length) throw new Error("No topics detected in this file");
+      setImportUnits(parsed.units);
+      toast.success(`Detected ${parsed.units.length} unit(s), ${parsed.units.reduce((a, u) => a + u.topics.length, 0)} topic(s)`);
+    } catch (e) {
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Could not read this file");
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  };
+
+  const toggleSkip = (key: string) => {
+    setImportSkipped((prev) => {
+      const n = new Set(prev);
+      n.has(key) ? n.delete(key) : n.add(key);
+      return n;
+    });
+  };
+
+  const confirmImport = async () => {
+    const units: NoteUnit[] = importUnits
+      .map((u, ui) => ({ u, ui }))
+      .filter(({ ui }) => !importSkipped.has(`${ui}:unit`))
+      .map(({ u, ui }) => ({
+        ...u,
+        topics: u.topics.filter((_, ti) => !importSkipped.has(`${ui}:${ti}`)),
+      }))
+      .filter((u) => u.topics.length > 0);
+
+    if (!units.length) { toast.error("Nothing selected to import"); return; }
+
+
+    setImporting(true);
+    try {
+      // Optionally generate content for topics with no body
+      let prepared = units;
+      if (importRegen) {
+        setGenerating(true);
+        prepared = [];
+        for (const u of units) {
+          const empties = u.topics.filter((t) => !t.content.trim()).map((t) => t.topicName);
+          const generated = empties.length ? await generateMany(empties, u.unitName, genDetail, genLang) : [];
+          const map = new Map(generated.map((g) => [g.topicName, g.content]));
+          prepared.push({
+            ...u,
+            topics: u.topics.map((t) => (t.content.trim() ? t : { ...t, content: map.get(t.topicName) || "" })),
+          });
+        }
+        setGenerating(false);
+      }
+
+      let next: GeneratedNotes;
+      if (importMode === "topics") {
+        const flat = prepared.flatMap((u) => u.topics);
+        next = {
+          ...notes,
+          units: notes.units.map((u, ui) => (ui !== addUnitIdx ? u : { ...u, topics: [...u.topics, ...flat] })),
+        };
+        setActiveUnit(addUnitIdx);
+      } else {
+        const base = notes.units.length;
+        next = {
+          ...notes,
+          units: [
+            ...notes.units,
+            ...prepared.map((u, i) => ({
+              unitNumber: u.unitNumber || String(base + i + 1),
+              unitName: u.unitName || `Unit ${base + i + 1}`,
+              topics: u.topics,
+            })),
+          ],
+        };
+        setActiveUnit(base);
+      }
+      setActiveTopic(0);
+      await persist(next);
+      setImportOpen(false);
+      toast.success("Imported successfully");
+    } catch (e) {
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setImporting(false);
+      setGenerating(false);
+    }
+  };
+
+
 
   const deleteTopic = async () => {
     if (!unit || unit.topics.length <= 1) { toast.error("Unit must have at least one topic"); return; }
@@ -507,19 +660,28 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
         </AnimatePresence>
       </div>
 
-      {/* Add Topic Dialog */}
+      {/* Add Topic Dialog (multiple) */}
       <Dialog open={addOpen} onOpenChange={(o) => !generating && setAddOpen(o)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add new topic</DialogTitle>
+            <DialogTitle>Add topics</DialogTitle>
             <DialogDescription>
               Adding to Unit {notes.units[addUnitIdx]?.unitNumber} — {notes.units[addUnitIdx]?.unitName}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Topic name</Label>
-              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Dependency Injection" autoFocus />
+              <Label>Topic names — one per line</Label>
+              <Textarea
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                rows={5}
+                placeholder={"Dependency Injection\nBean Lifecycle\nSpring Boot Starters"}
+                autoFocus
+              />
+              <p className="text-xs text-muted-foreground">
+                {parseNames(newName).length} topic(s) detected — all will be generated together.
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -545,9 +707,15 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
                 </Select>
               </div>
             </div>
+            {progress && (
+              <p className="text-sm text-primary">Generating {progress.done}/{progress.total}…</p>
+            )}
           </div>
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button variant="ghost" onClick={addTopicEmpty} disabled={generating}>Add empty</Button>
+            <Button variant="ghost" onClick={() => openImport("topics", addUnitIdx)} disabled={generating} className="gap-1.5">
+              <Upload className="h-4 w-4" /> Import file
+            </Button>
+            <Button variant="secondary" onClick={addTopicEmpty} disabled={generating}>Add empty</Button>
             <Button onClick={addTopicWithAI} disabled={generating} className="gap-1.5">
               {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               {generating ? "Generating…" : "Generate with AI"}
@@ -556,12 +724,12 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
         </DialogContent>
       </Dialog>
 
-      {/* Add Unit Dialog */}
+      {/* Add Unit Dialog (multiple topics) */}
       <Dialog open={unitOpen} onOpenChange={(o) => !generating && setUnitOpen(o)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add new unit</DialogTitle>
-            <DialogDescription>Create a unit, optionally with a first topic generated by AI.</DialogDescription>
+            <DialogDescription>Create a unit with multiple topics, optionally generated by AI.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-[100px_1fr] gap-3">
@@ -575,8 +743,14 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label>First topic (optional)</Label>
-              <Input value={newUnitTopic} onChange={(e) => setNewUnitTopic(e.target.value)} placeholder="e.g. Reactive Streams" />
+              <Label>Topics — one per line</Label>
+              <Textarea
+                value={newUnitTopic}
+                onChange={(e) => setNewUnitTopic(e.target.value)}
+                rows={5}
+                placeholder={"Reactive Streams\nBackpressure\nWebFlux basics"}
+              />
+              <p className="text-xs text-muted-foreground">{parseNames(newUnitTopic).length} topic(s) detected.</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -602,19 +776,96 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
                 </Select>
               </div>
             </div>
+            {progress && (
+              <p className="text-sm text-primary">Generating {progress.done}/{progress.total}…</p>
+            )}
           </div>
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button variant="ghost" onClick={() => setUnitOpen(false)} disabled={generating}>Cancel</Button>
+            <Button variant="ghost" onClick={() => openImport("units")} disabled={generating} className="gap-1.5">
+              <Upload className="h-4 w-4" /> Import file
+            </Button>
             <Button variant="secondary" onClick={() => addUnit()} disabled={generating} className="gap-1.5">
               <FolderPlus className="h-4 w-4" /> Add Unit
             </Button>
             <Button onClick={() => addUnit({ withAI: true })} disabled={generating} className="gap-1.5">
               {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              {generating ? "Generating…" : "Add + Generate topic"}
+              {generating ? "Generating…" : "Add + Generate topics"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Import Dialog */}
+      <Dialog open={importOpen} onOpenChange={(o) => !importing && !generating && setImportOpen(o)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Import {importMode === "units" ? "units & topics" : "topics"}</DialogTitle>
+            <DialogDescription>
+              Supported files: Word (.docx), Markdown (.md), text (.txt), JSON (.json), PDF (.pdf)
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".docx,.md,.txt,.json,.pdf"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportFile(f); }}
+            />
+            <Button variant="outline" onClick={() => importInputRef.current?.click()} disabled={importing} className="w-full gap-2">
+              {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {importing ? "Reading file…" : "Choose file"}
+            </Button>
+
+            {importUnits.length > 0 && (
+              <div className="max-h-64 overflow-y-auto rounded-md border border-border p-3 space-y-3">
+                {importUnits.map((u, ui) => (
+                  <div key={ui} className="space-y-1.5">
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <Checkbox
+                        checked={!importSkipped.has(`${ui}:unit`)}
+                        onCheckedChange={() => toggleSkip(`${ui}:unit`)}
+                      />
+                      Unit {u.unitNumber} — {u.unitName}
+                    </label>
+                    <div className="pl-6 space-y-1">
+                      {u.topics.map((t, ti) => (
+                        <label key={ti} className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Checkbox
+                            checked={!importSkipped.has(`${ui}:${ti}`)}
+                            onCheckedChange={() => toggleSkip(`${ui}:${ti}`)}
+                          />
+                          <span className="truncate">{t.topicName}</span>
+                          {!t.content.trim() && <span className="text-xs text-amber-600">(no content)</span>}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {importUnits.length > 0 && (
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox checked={importRegen} onCheckedChange={(v) => setImportRegen(!!v)} />
+                <span>Generate AI notes for topics that have no content (uses the Detail Level & Language above)</span>
+              </label>
+            )}
+
+            {progress && <p className="text-sm text-primary">Generating {progress.done}/{progress.total}…</p>}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="ghost" onClick={() => setImportOpen(false)} disabled={importing || generating}>Cancel</Button>
+            <Button onClick={confirmImport} disabled={importing || generating || !importUnits.length} className="gap-1.5">
+              {(importing || generating) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Import
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </motion.div>
   );
 }

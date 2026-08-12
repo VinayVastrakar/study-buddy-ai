@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { BookOpen, History, LogOut, User } from "lucide-react";
+import { BookOpen, History, LogOut, ShieldCheck, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,8 +13,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
 export default function AppHeader() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin } = useAuth();
   const navigate = useNavigate();
+
 
   const handleSignOut = async () => {
     await signOut();
@@ -35,11 +36,19 @@ export default function AppHeader() {
 
         {user && (
           <div className="flex items-center gap-2">
+            {isAdmin && (
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/admin">
+                  <ShieldCheck className="h-4 w-4 mr-1.5" /> Admin
+                </Link>
+              </Button>
+            )}
             <Button variant="ghost" size="sm" asChild>
               <Link to="/history">
                 <History className="h-4 w-4 mr-1.5" /> History
               </Link>
             </Button>
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="rounded-full h-9 w-9 bg-primary/10 text-primary font-medium">
@@ -55,6 +64,12 @@ export default function AppHeader() {
                 <DropdownMenuItem asChild>
                   <Link to="/history"><History className="h-4 w-4 mr-2" /> My history</Link>
                 </DropdownMenuItem>
+                {isAdmin && (
+                  <DropdownMenuItem asChild>
+                    <Link to="/admin"><ShieldCheck className="h-4 w-4 mr-2" /> Admin panel</Link>
+                  </DropdownMenuItem>
+                )}
+
                 <DropdownMenuItem onClick={handleSignOut} className="text-destructive">
                   <LogOut className="h-4 w-4 mr-2" /> Sign out
                 </DropdownMenuItem>
