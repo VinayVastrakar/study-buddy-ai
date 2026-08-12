@@ -52,19 +52,31 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
   const [draftContent, setDraftContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
-  // Add topic dialog
+  // Add topic dialog (multi)
   const [addOpen, setAddOpen] = useState(false);
   const [addUnitIdx, setAddUnitIdx] = useState(0);
   const [newName, setNewName] = useState("");
   const [genDetail, setGenDetail] = useState(String(notes.detailLevel || "2"));
   const [genLang, setGenLang] = useState(notes.language || "English");
 
-  // Add unit dialog
+  // Add unit dialog (multi topics)
   const [unitOpen, setUnitOpen] = useState(false);
   const [newUnitName, setNewUnitName] = useState("");
   const [newUnitNumber, setNewUnitNumber] = useState("");
   const [newUnitTopic, setNewUnitTopic] = useState("");
+
+  // Import dialog
+  const [importOpen, setImportOpen] = useState(false);
+  const [importUnits, setImportUnits] = useState<NoteUnit[]>([]);
+  const [importSkipped, setImportSkipped] = useState<Set<string>>(new Set());
+  const [importMode, setImportMode] = useState<"units" | "topics">("units");
+  const [importRegen, setImportRegen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+
 
   // Read-aloud sentences (from rendered markdown)
   const [sentences, setSentences] = useState<string[]>([]);
