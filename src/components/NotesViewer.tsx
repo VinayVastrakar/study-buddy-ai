@@ -315,14 +315,7 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
   };
 
   const confirmImport = async () => {
-    const selected: NoteUnit[] = importUnits
-      .map((u, ui) => ({
-        ...u,
-        topics: u.topics.filter((_, ti) => !importSkipped.has(`${ui}:${ti}`)),
-      }))
-      .filter((u) => u.topics.length > 0 && !importSkipped.has(`${importUnits.indexOf(u)}:unit`));
-
-    const chosen = importUnits
+    const units: NoteUnit[] = importUnits
       .map((u, ui) => ({ u, ui }))
       .filter(({ ui }) => !importSkipped.has(`${ui}:unit`))
       .map(({ u, ui }) => ({
@@ -331,8 +324,8 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
       }))
       .filter((u) => u.topics.length > 0);
 
-    const units = chosen.length ? chosen : selected;
     if (!units.length) { toast.error("Nothing selected to import"); return; }
+
 
     setImporting(true);
     try {
