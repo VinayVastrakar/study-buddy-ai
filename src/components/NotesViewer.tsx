@@ -2,14 +2,15 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen, ChevronRight, ArrowLeft, GraduationCap, Download,
-  Pencil, Plus, Save, X, Trash2, Sparkles, Loader2, FolderPlus,
+  Pencil, Plus, Save, X, Trash2, Sparkles, Loader2, FolderPlus, Upload,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { GeneratedNotes } from "@/types/notes";
+import type { GeneratedNotes, NoteUnit } from "@/types/notes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -23,9 +24,11 @@ import {
   exportPDF, exportDOCX, exportMarkdown, exportJSON,
   exportTopicPDF, exportTopicDOCX, exportTopicMarkdown, exportTopicJSON,
 } from "@/lib/exportNotes";
+import { parseImportFile } from "@/lib/importNotes";
 import { supabase } from "@/integrations/supabase/client";
 import MarkdownContent from "./MarkdownContent";
 import ReadAloud from "./ReadAloud";
+
 
 interface Props {
   notes: GeneratedNotes;
