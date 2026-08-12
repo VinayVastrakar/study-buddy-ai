@@ -16,7 +16,16 @@
 - Delete a note from the admin list.
 - A clear "viewing as admin" banner so it's obvious whose data is open.
 
-## 2. Bulk AI topic & unit adding
+## 2. Bulk AI topic & unit adding + file import
+
+**Import topics/notes from a file** (Word .docx, Markdown .md, JSON, PDF)
+- "Import" button in both the Add topic and Add unit dialogs.
+- PDF/DOCX text is extracted in the browser (pdfjs + mammoth); .md and .json are read directly.
+- JSON in the app's own notes shape imports units/topics with their content as-is; other formats are parsed into units → topics with their text as content.
+- Preview screen before inserting: which units/topics were detected, with checkboxes to drop any.
+- Options: import into the current unit as topics, or append as new units; and optionally "regenerate content with AI" for imported topic names that have no body.
+
+
 
 **Add topic dialog (multi)**
 - Textarea: one topic name per line (comma-separated also accepted).
