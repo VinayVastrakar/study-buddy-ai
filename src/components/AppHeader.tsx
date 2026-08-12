@@ -36,11 +36,19 @@ export default function AppHeader() {
 
         {user && (
           <div className="flex items-center gap-2">
+            {isAdmin && (
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/admin">
+                  <ShieldCheck className="h-4 w-4 mr-1.5" /> Admin
+                </Link>
+              </Button>
+            )}
             <Button variant="ghost" size="sm" asChild>
               <Link to="/history">
                 <History className="h-4 w-4 mr-1.5" /> History
               </Link>
             </Button>
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="rounded-full h-9 w-9 bg-primary/10 text-primary font-medium">
