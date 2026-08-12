@@ -1,32 +1,41 @@
-## Goal
-NotesViewer me ek "Export" dropdown add karna jisse user apne generated/saved notes ko **PDF, DOCX, Markdown, ya JSON** format me download kar sake — proper formatting ke saath (units → topics hierarchy, headings, spacing). Ye NotesViewer component ke andar rahega, isliye Index page (fresh generation) aur NotesView page (history se opened) — dono jagah automatic available ho jayega.
+# Admin Panel + Bulk AI Topic/Unit Adding
 
-## Approach
+## 1. Roles & Admin Panel
 
-Ek naya utility module `src/lib/exportNotes.ts` banayenge jo `GeneratedNotes` object leke 4 formats me file generate karega. Phir NotesViewer header me existing badges ke saath ek shadcn `DropdownMenu` add karenge with 4 export options.
+**Roles storage**: new `app_role` enum (`admin`, `user`) + `user_roles` table (separate from profiles, security-definer `has_role()` function). Your account gets the `admin` role seeded by email — tell me which email to use when you approve.
 
-### Format details
-- **PDF** — `jspdf` use karke: title page (subject, course, language, level) + har unit ka heading + har topic ka sub-heading + content with word-wrap and page-breaks. Font: Helvetica (jsPDF built-in, koi custom font load nahi).
-- **DOCX** — `docx` library: HEADING_1 for subject, HEADING_2 for units, HEADING_3 for topics, Normal paragraphs for content. `Packer.toBlob` → download.
-- **Markdown** — Pure string builder: `# subject`, `## Unit N — name`, `### topic`, content paragraphs. `.md` blob.
-- **JSON** — `JSON.stringify(notes, null, 2)` as `.json` blob (backup / reimport friendly).
+**Access rules**
+- Regular users: unchanged (only their own notes).
+- Admin: full read + edit + delete on every user's notes, plus can view all profiles.
+- Admin also keeps normal user mode — the same app, with an extra "Admin" entry in the header menu.
 
-Sab downloads sanitized filename use karenge: `<subject>-notes.<ext>`.
+**New `/admin` route** (guarded: redirects non-admins to `/`)
+- Users list: display name, email, notes count, joined date. Search by email/name.
+- Click a user → their notes list (subject, course, language, level, date).
+- Open any note → the existing notes viewer with full edit/add/delete/export, saving back to that user's record.
+- Delete a note from the admin list.
+- A clear "viewing as admin" banner so it's obvious whose data is open.
 
-### UI change
-NotesViewer ke top-right badges wale div me ek `DropdownMenu` add karenge:
-```
-[Download ▼]  [Language]  [Level N]
-```
-Options: Export as PDF / Word (.docx) / Markdown / JSON. Har click par corresponding exporter run karega and toast show karega.
+## 2. Bulk AI topic & unit adding
 
-## Files
-- **New** `src/lib/exportNotes.ts` — 4 exporter functions + filename helper.
-- **Edit** `src/components/NotesViewer.tsx` — import exporters, add DropdownMenu button in header.
-- **Package installs** — `jspdf` and `docx` (bun add).
+**Add topic dialog (multi)**
+- Textarea: one topic name per line (comma-separated also accepted).
+- Detail level + language selectors (as today).
+- "Add empty" adds all names with blank content; "Generate with AI" generates content for each topic, with progress ("3/7 generated") and per-topic failure kept visible instead of aborting the batch.
+
+**Add unit dialog (syllabus-style)**
+- Unit number + unit name.
+- Textarea for that unit's topics, one per line — same syllabus feel as the home page.
+- Buttons: "Add unit only", "Add unit + topics (empty)", "Add unit + generate all with AI".
+
+**Generation behaviour**
+- Requests run in small parallel batches (3 at a time) so 10+ topics stay fast without hitting rate limits.
+- Rate limit / credit errors surface once with a clear message; already-generated topics are kept.
+- Works identically for fresh notes and history notes (and admin-opened notes).
 
 ## Technical notes
-- `jspdf` handles multi-page automatically via `splitTextToSize` + manual `addPage()` when y > page height.
-- `docx` v9 supports `HeadingLevel.HEADING_1/2/3` and `Packer.toBlob()` in browser.
-- No backend/db changes needed — pure client-side export.
-- No changes to Index.tsx or NotesView.tsx (they already use NotesViewer).
+- Migration: `app_role` enum, `user_roles` table with GRANTs + RLS, `has_role()` security-definer function, admin-scoped policies added to `notes_history` and `profiles`, plus admin `SELECT` on `user_roles`.
+- Seed the admin role for your email via a data insert after the migration.
+- `useAuth` extended with an `isAdmin` flag (queried from `user_roles`); new `AdminRoute` guard component.
+- New files: `src/pages/Admin.tsx`, `src/pages/AdminUserNotes.tsx`, `src/components/AdminRoute.tsx`, `src/hooks/useIsAdmin.ts`.
+- `NotesViewer.tsx`: the two dialogs move to multi-input state; a shared `generateTopics()` helper with a concurrency limit replaces the single-topic calls to the `generate-topic` function (function itself unchanged).
