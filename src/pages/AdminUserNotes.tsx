@@ -1,0 +1,92 @@
+import { useEffect, useState } from "react";
+import { Link, useParams, useNavigate } from "react-router-dom";
+import { ArrowLeft, Clock, Loader2, ShieldCheck, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import AppHeader from "@/components/AppHeader";
+import { Button } from "@/components/ui/button";
+
+interface NoteRow {
+  id: string;
+  subject: string;
+  course: string | null;
+  language: string;
+  detail_level: string;
+  created_at: string;
+}
+
+export default function AdminUserNotes() {
+  const { userId } = useParams();
+  const navigate = useNavigate();
+  const [rows, setRows] = useState<NoteRow[]>([]);
+  const [email, setEmail] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!userId) return;
+    document.title = "Admin — User notes";
+    (async () => {
+      const [{ data: profile }, { data, error }] = await Promise.all([
+        supabase.from("profiles").select("email, display_name").eq("id", userId).maybeSingle(),
+        supabase
+          .from("notes_history")
+          .select("id, subject, course, language, detail_level, created_at")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false }),
+      ]);
+      if (error) toast.error(error.message);
+      setEmail(profile?.email || profile?.display_name || userId);
+      setRows(data || []);
+      setLoading(false);
+    })();
+  }, [userId]);
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("Delete this user's note?")) return;
+    const { error } = await supabase.from("notes_history").delete().eq("id", id);
+    if (error) return toast.error(error.message);
+    setRows((r) => r.filter((x) => x.id !== id));
+    toast.success("Deleted");
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      <AppHeader />
+      <main className="max-w-4xl mx-auto px-4 py-8">
+        <Button variant="ghost" size="sm" onClick={() => navigate("/admin")} className="text-muted-foreground mb-3">
+          <ArrowLeft className="h-4 w-4 mr-1" /> All users
+        </Button>
+
+        <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-2 mb-6 flex items-center gap-2 text-sm">
+          <ShieldCheck className="h-4 w-4 text-primary" />
+          Viewing as admin — notes of <span className="font-medium">{email}</span>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+        ) : rows.length === 0 ? (
+          <p className="text-center text-muted-foreground py-16">This user has no notes yet.</p>
+        ) : (
+          <div className="grid gap-3">
+            {rows.map((r) => (
+              <div key={r.id} className="group rounded-lg border border-border bg-card p-4 hover:border-primary/40 transition-colors flex items-center gap-4">
+                <Link to={`/notes/${r.id}`} className="flex-1 min-w-0">
+                  <h3 className="font-heading text-lg text-foreground truncate">{r.subject}</h3>
+                  {r.course && <p className="text-sm text-muted-foreground truncate">{r.course}</p>}
+                  <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+                    <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary">{r.language}</span>
+                    <span className="px-2 py-0.5 rounded-full bg-accent/10">Level {r.detail_level}</span>
+                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{new Date(r.created_at).toLocaleDateString()}</span>
+                  </div>
+                </Link>
+                <Button variant="ghost" size="icon" onClick={() => handleDelete(r.id)} className="text-destructive">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
