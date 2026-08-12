@@ -64,6 +64,12 @@ export default function AppHeader() {
                 <DropdownMenuItem asChild>
                   <Link to="/history"><History className="h-4 w-4 mr-2" /> My history</Link>
                 </DropdownMenuItem>
+                {isAdmin && (
+                  <DropdownMenuItem asChild>
+                    <Link to="/admin"><ShieldCheck className="h-4 w-4 mr-2" /> Admin panel</Link>
+                  </DropdownMenuItem>
+                )}
+
                 <DropdownMenuItem onClick={handleSignOut} className="text-destructive">
                   <LogOut className="h-4 w-4 mr-2" /> Sign out
                 </DropdownMenuItem>
