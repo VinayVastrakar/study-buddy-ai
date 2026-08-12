@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { BookOpen, History, LogOut, User } from "lucide-react";
+import { BookOpen, History, LogOut, ShieldCheck, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,8 +13,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
 export default function AppHeader() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin } = useAuth();
   const navigate = useNavigate();
+
 
   const handleSignOut = async () => {
     await signOut();
