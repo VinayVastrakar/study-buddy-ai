@@ -174,61 +174,97 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
     setUnitOpen(true);
   };
 
-  const addUnit = async (opts?: { withAI?: boolean }) => {
+  /** Split a textarea value into a list of topic names. */
+  const parseNames = (raw: string): string[] =>
+    raw
+      .split(/\r?\n|,/)
+      .map((s) => s.replace(/^[-*•\d.)\s]+/, "").trim())
+      .filter(Boolean);
+
+  /** Generate content for many topics with a small concurrency limit. */
+  const generateMany = async (
+    names: string[],
+    unitName: string,
+    detailLevel: string,
+    language: string
+  ): Promise<{ topicName: string; content: string }[]> => {
+    const results: { topicName: string; content: string }[] = names.map((n) => ({ topicName: n, content: "" }));
+    let done = 0;
+    let failures = 0;
+    setProgress({ done: 0, total: names.length });
+
+    const queue = names.map((n, i) => ({ n, i }));
+    const worker = async () => {
+      for (;;) {
+        const job = queue.shift();
+        if (!job) return;
+        try {
+          results[job.i].content = await callAI(job.n, unitName, detailLevel, language);
+        } catch (e) {
+          console.error("generate failed for", job.n, e);
+          failures++;
+        }
+        done++;
+        setProgress({ done, total: names.length });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, names.length) }, worker));
+    setProgress(null);
+    if (failures) toast.error(`${failures} of ${names.length} topics could not be generated — added as empty`);
+    return results;
+  };
+
+  const addUnit = async (opts?: { withAI?: boolean; topicsOnly?: boolean }) => {
     if (!newUnitName.trim()) { toast.error("Enter a unit name"); return; }
     const num = newUnitNumber.trim() || String(notes.units.length + 1);
     const unitName = newUnitName.trim();
-    const topicName = newUnitTopic.trim();
+    const names = parseNames(newUnitTopic);
 
-    let firstTopic = { topicName: topicName || "Introduction", content: "" };
+    let topics = (names.length ? names : ["Introduction"]).map((n) => ({ topicName: n, content: "" }));
 
     if (opts?.withAI) {
-      if (!topicName) { toast.error("Enter a topic name to generate with AI"); return; }
+      if (!names.length) { toast.error("Enter at least one topic name to generate"); return; }
       setGenerating(true);
       try {
-        const content = await callAI(topicName, unitName, genDetail, genLang);
-        firstTopic = { topicName, content };
-      } catch (e) {
-        console.error(e);
-        toast.error(e instanceof Error ? e.message : "Generation failed");
+        topics = await generateMany(names, unitName, genDetail, genLang);
+      } finally {
         setGenerating(false);
-        return;
       }
-      setGenerating(false);
     }
 
     const next: GeneratedNotes = {
       ...notes,
-      units: [...notes.units, { unitNumber: num, unitName, topics: [firstTopic] }],
+      units: [...notes.units, { unitNumber: num, unitName, topics }],
     };
     await persist(next);
     setUnitOpen(false);
     setActiveUnit(next.units.length - 1);
     setActiveTopic(0);
-    toast.success(opts?.withAI ? "Unit + AI topic added" : "Unit added");
+    toast.success(`Unit added with ${topics.length} topic${topics.length > 1 ? "s" : ""}`);
   };
 
-  const insertNewTopic = async (name: string, content: string) => {
+  const insertTopics = async (unitIdx: number, list: { topicName: string; content: string }[]) => {
     const next: GeneratedNotes = {
       ...notes,
       units: notes.units.map((u, ui) =>
-        ui !== addUnitIdx ? u : { ...u, topics: [...u.topics, { topicName: name, content }] }
+        ui !== unitIdx ? u : { ...u, topics: [...u.topics, ...list] }
       ),
     };
     await persist(next);
-    setActiveUnit(addUnitIdx);
-    setActiveTopic(next.units[addUnitIdx].topics.length - 1);
+    setActiveUnit(unitIdx);
+    setActiveTopic(Math.max(0, next.units[unitIdx].topics.length - list.length));
     setAddOpen(false);
   };
 
   const addTopicWithAI = async () => {
-    if (!newName.trim()) { toast.error("Enter a topic name"); return; }
+    const names = parseNames(newName);
+    if (!names.length) { toast.error("Enter at least one topic name"); return; }
     setGenerating(true);
     try {
       const targetUnit = notes.units[addUnitIdx];
-      const content = await callAI(newName.trim(), targetUnit?.unitName || "", genDetail, genLang);
-      await insertNewTopic(newName.trim(), content);
-      toast.success("Topic added with AI content");
+      const list = await generateMany(names, targetUnit?.unitName || "", genDetail, genLang);
+      await insertTopics(addUnitIdx, list);
+      toast.success(`${list.length} topic${list.length > 1 ? "s" : ""} added with AI content`);
     } catch (e) {
       console.error(e);
       toast.error(e instanceof Error ? e.message : "Generation failed");
@@ -238,13 +274,122 @@ export default function NotesViewer({ notes: initialNotes, onReset, onChange }: 
   };
 
   const addTopicEmpty = async () => {
-    if (!newName.trim()) { toast.error("Enter a topic name"); return; }
-    await insertNewTopic(newName.trim(), "");
-    setDraftName(newName.trim());
-    setDraftContent("");
-    setEditing(true);
-    toast.success("Topic added — start writing");
+    const names = parseNames(newName);
+    if (!names.length) { toast.error("Enter at least one topic name"); return; }
+    await insertTopics(addUnitIdx, names.map((n) => ({ topicName: n, content: "" })));
+    toast.success(`${names.length} topic${names.length > 1 ? "s" : ""} added`);
   };
+
+  // ---------- Import (docx / md / json / pdf) ----------
+  const openImport = (mode: "units" | "topics", unitIdx?: number) => {
+    setImportMode(mode);
+    if (typeof unitIdx === "number") setAddUnitIdx(unitIdx);
+    setImportUnits([]);
+    setImportSkipped(new Set());
+    setImportRegen(false);
+    setImportOpen(true);
+  };
+
+  const handleImportFile = async (file: File) => {
+    setImporting(true);
+    try {
+      const parsed = await parseImportFile(file);
+      if (!parsed.units.length) throw new Error("No topics detected in this file");
+      setImportUnits(parsed.units);
+      toast.success(`Detected ${parsed.units.length} unit(s), ${parsed.units.reduce((a, u) => a + u.topics.length, 0)} topic(s)`);
+    } catch (e) {
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Could not read this file");
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  };
+
+  const toggleSkip = (key: string) => {
+    setImportSkipped((prev) => {
+      const n = new Set(prev);
+      n.has(key) ? n.delete(key) : n.add(key);
+      return n;
+    });
+  };
+
+  const confirmImport = async () => {
+    const selected: NoteUnit[] = importUnits
+      .map((u, ui) => ({
+        ...u,
+        topics: u.topics.filter((_, ti) => !importSkipped.has(`${ui}:${ti}`)),
+      }))
+      .filter((u) => u.topics.length > 0 && !importSkipped.has(`${importUnits.indexOf(u)}:unit`));
+
+    const chosen = importUnits
+      .map((u, ui) => ({ u, ui }))
+      .filter(({ ui }) => !importSkipped.has(`${ui}:unit`))
+      .map(({ u, ui }) => ({
+        ...u,
+        topics: u.topics.filter((_, ti) => !importSkipped.has(`${ui}:${ti}`)),
+      }))
+      .filter((u) => u.topics.length > 0);
+
+    const units = chosen.length ? chosen : selected;
+    if (!units.length) { toast.error("Nothing selected to import"); return; }
+
+    setImporting(true);
+    try {
+      // Optionally generate content for topics with no body
+      let prepared = units;
+      if (importRegen) {
+        setGenerating(true);
+        prepared = [];
+        for (const u of units) {
+          const empties = u.topics.filter((t) => !t.content.trim()).map((t) => t.topicName);
+          const generated = empties.length ? await generateMany(empties, u.unitName, genDetail, genLang) : [];
+          const map = new Map(generated.map((g) => [g.topicName, g.content]));
+          prepared.push({
+            ...u,
+            topics: u.topics.map((t) => (t.content.trim() ? t : { ...t, content: map.get(t.topicName) || "" })),
+          });
+        }
+        setGenerating(false);
+      }
+
+      let next: GeneratedNotes;
+      if (importMode === "topics") {
+        const flat = prepared.flatMap((u) => u.topics);
+        next = {
+          ...notes,
+          units: notes.units.map((u, ui) => (ui !== addUnitIdx ? u : { ...u, topics: [...u.topics, ...flat] })),
+        };
+        setActiveUnit(addUnitIdx);
+      } else {
+        const base = notes.units.length;
+        next = {
+          ...notes,
+          units: [
+            ...notes.units,
+            ...prepared.map((u, i) => ({
+              unitNumber: u.unitNumber || String(base + i + 1),
+              unitName: u.unitName || `Unit ${base + i + 1}`,
+              topics: u.topics,
+            })),
+          ],
+        };
+        setActiveUnit(base);
+      }
+      setActiveTopic(0);
+      await persist(next);
+      setImportOpen(false);
+      toast.success("Imported successfully");
+    } catch (e) {
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setImporting(false);
+      setGenerating(false);
+    }
+  };
+
+
 
   const deleteTopic = async () => {
     if (!unit || unit.topics.length <= 1) { toast.error("Unit must have at least one topic"); return; }
